@@ -1555,14 +1555,17 @@ extension Ghostty.SurfaceView: NSTextInputClient {
     }
 
     func selectedRange() -> NSRange {
-        guard let surface = self.surface else { return NSRange() }
+        let notFoundRange = NSRange(location: NSNotFound, length: 0)
+        guard let surface = self.surface else { return notFoundRange }
 
         // Get our range from the Ghostty API. There is a race condition between getting the
         // range and actually using it since our selection may change but there isn't a good
         // way I can think of to solve this for AppKit.
         var text = ghostty_text_s()
-        guard ghostty_surface_read_selection(surface, &text) else { return NSRange() }
+        guard ghostty_surface_read_selection(surface, &text) else { return notFoundRange }
         defer { ghostty_surface_free_text(surface, &text) }
+        // When text.offset_len is 0, text.offset_start is assumed to be the cursor's
+        // byte offset within the full buffer (as returned by accessibilityValue()).
         return NSRange(location: Int(text.offset_start), length: Int(text.offset_len))
     }
 
