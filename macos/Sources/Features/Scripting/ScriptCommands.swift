@@ -30,9 +30,9 @@ class NewTerminalCommand: NSScriptCommand {
             config.waitAfterCommand = wait
         }
 
-        // Set working directory if provided
+        // Set working directory if provided (expand ~ to home directory)
         if let directory, !directory.isEmpty {
-            config.workingDirectory = directory
+            config.workingDirectory = NSString(string: directory).expandingTildeInPath
         }
 
         // Execute on main thread and return result
@@ -43,10 +43,10 @@ class NewTerminalCommand: NSScriptCommand {
             let isTab = location == FourCharCode(0x74616276) // 'tabv'
 
             if isTab {
-                // Create new tab
+                // Create new tab using preferredParent (same pattern as App Intents)
                 if let controller = TerminalController.newTab(
                     ghostty,
-                    from: nil,
+                    from: TerminalController.preferredParent?.window,
                     withBaseConfig: config
                 ) {
                     if let view = controller.surfaceTree.root?.leftmostLeaf() {
@@ -136,25 +136,18 @@ class SendTextCommand: NSScriptCommand {
 
 // MARK: - Focus Command
 
-/// AppleScript command: focus terminal id "UUID"
+/// AppleScript command: focus in terminal 1
 @objc(FocusCommand)
 class FocusCommand: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
-        // Get the terminal ID
-        guard let terminalID = evaluatedArguments?["terminalID"] as? String else {
+        // Get the terminal to focus
+        guard let terminal = evaluatedArguments?["terminal"] as? ScriptableTerminal else {
             scriptErrorNumber = -1701
-            scriptErrorString = "Missing terminal ID"
+            scriptErrorString = "Missing terminal to focus"
             return nil
         }
 
         let work = { () -> Bool in
-            // Find terminal by ID
-            guard let terminal = MainActor.assumeIsolated({
-                TerminalRegistry.shared.terminal(withIDString: terminalID)
-            }) else {
-                return false
-            }
-
             guard let surfaceView = terminal.surfaceView else {
                 return false
             }
@@ -196,25 +189,18 @@ class FocusCommand: NSScriptCommand {
 
 // MARK: - Close Terminal Command
 
-/// AppleScript command: close terminal id "UUID"
+/// AppleScript command: close in terminal 1
 @objc(CloseTerminalCommand)
 class CloseTerminalCommand: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
-        // Get the terminal ID
-        guard let terminalID = evaluatedArguments?["terminalID"] as? String else {
+        // Get the terminal to close
+        guard let terminal = evaluatedArguments?["terminal"] as? ScriptableTerminal else {
             scriptErrorNumber = -1701
-            scriptErrorString = "Missing terminal ID"
+            scriptErrorString = "Missing terminal to close"
             return nil
         }
 
         let work = { () -> Bool in
-            // Find terminal by ID
-            guard let terminal = MainActor.assumeIsolated({
-                TerminalRegistry.shared.terminal(withIDString: terminalID)
-            }) else {
-                return false
-            }
-
             guard let surfaceView = terminal.surfaceView else {
                 return false
             }
@@ -379,3 +365,121 @@ class InvokeCommandCommand: NSScriptCommand {
         return result
     }
 }
+
+// MARK: - Split Command
+
+/// AppleScript command: split direction right in terminal 1
+@objc(SplitCommand)
+class SplitCommand: NSScriptCommand {
+    override func performDefaultImplementation() -> Any? {
+        // Get the terminal to split
+        guard let terminal = evaluatedArguments?["terminal"] as? ScriptableTerminal else {
+            scriptErrorNumber = -1701
+            scriptErrorString = "Missing terminal to split"
+            return nil
+        }
+
+        // Get the direction
+        guard let directionCode = evaluatedArguments?["direction"] as? FourCharCode else {
+            scriptErrorNumber = -1701
+            scriptErrorString = "Missing split direction"
+            return nil
+        }
+
+        // Map direction code to action string
+        let direction: String
+        switch directionCode {
+        case FourCharCode(0x72676874): // 'rght'
+            direction = "right"
+        case FourCharCode(0x646F776E): // 'down'
+            direction = "down"
+        case FourCharCode(0x6C656674): // 'left'
+            direction = "left"
+        case FourCharCode(0x75707764): // 'upwd'
+            direction = "up"
+        default:
+            direction = "right"
+        }
+
+        var resultTerminal: ScriptableTerminal?
+
+        let work = {
+            MainActor.assumeIsolated {
+                guard let surface = terminal.surfaceView?.surfaceModel else {
+                    return
+                }
+
+                // Get terminal count before split
+                let terminalsBefore = TerminalRegistry.shared.allTerminals
+
+                // Perform the split action
+                _ = surface.perform(action: "new_split:\(direction)")
+
+                // Small delay to let the split complete, then find the new terminal
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    let terminalsAfter = TerminalRegistry.shared.allTerminals
+                    // Find the new terminal (one that wasn't in the before list)
+                    let beforeIDs = Set(terminalsBefore.map { $0.id })
+                    if let newTerminal = terminalsAfter.first(where: { !beforeIDs.contains($0.id) }) {
+                        resultTerminal = newTerminal
+                    }
+                }
+            }
+        }
+
+        if Thread.isMainThread {
+            work()
+        } else {
+            DispatchQueue.main.sync {
+                work()
+            }
+        }
+
+        // Wait a bit for the async result
+        Thread.sleep(forTimeInterval: 0.2)
+
+        return resultTerminal
+    }
+}
+
+// MARK: - Clear Command
+
+/// AppleScript command: clear screen in terminal 1
+@objc(ClearCommand)
+class ClearCommand: NSScriptCommand {
+    override func performDefaultImplementation() -> Any? {
+        // Get the terminal to clear
+        guard let terminal = evaluatedArguments?["terminal"] as? ScriptableTerminal else {
+            scriptErrorNumber = -1701
+            scriptErrorString = "Missing terminal to clear"
+            return nil
+        }
+
+        var success = false
+        let work = {
+            success = MainActor.assumeIsolated {
+                guard let surface = terminal.surfaceView?.surfaceModel else {
+                    return false
+                }
+                return surface.perform(action: "clear_screen")
+            }
+        }
+
+        if Thread.isMainThread {
+            work()
+        } else {
+            DispatchQueue.main.sync {
+                work()
+            }
+        }
+
+        if !success {
+            scriptErrorNumber = -1728
+            scriptErrorString = "Could not clear terminal"
+        }
+
+        return nil
+    }
+}
+
+

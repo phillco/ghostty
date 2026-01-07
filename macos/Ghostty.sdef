@@ -16,6 +16,13 @@
             <enumerator name="tab" code="tabv" description="Open in a new tab."/>
         </enumeration>
 
+        <enumeration name="split direction" code="SpDr">
+            <enumerator name="right" code="rght" description="Split to the right."/>
+            <enumerator name="down" code="down" description="Split downward."/>
+            <enumerator name="left" code="left" description="Split to the left."/>
+            <enumerator name="up" code="upwd" description="Split upward."/>
+        </enumeration>
+
         <class name="terminal" code="Term" plural="terminals" description="A terminal session.">
             <cocoa class="ScriptableTerminal"/>
             <property name="id" code="idnt" type="text" access="r" description="Unique identifier.">
@@ -75,17 +82,17 @@
             </parameter>
         </command>
 
-        <command name="focus terminal" code="Ghstfcus" description="Focus a terminal.">
+        <command name="focus" code="Ghstfcus" description="Focus a terminal.">
             <cocoa class="FocusCommand"/>
-            <parameter name="id" code="Ftid" type="text" description="The terminal ID to focus.">
-                <cocoa key="terminalID"/>
+            <parameter name="in" code="FcIn" type="terminal" description="The terminal to focus.">
+                <cocoa key="terminal"/>
             </parameter>
         </command>
 
-        <command name="close terminal" code="Ghstclse" description="Close a terminal.">
+        <command name="close" code="Ghstclse" description="Close a terminal.">
             <cocoa class="CloseTerminalCommand"/>
-            <parameter name="id" code="Ctid" type="text" description="The terminal ID to close.">
-                <cocoa key="terminalID"/>
+            <parameter name="in" code="ClsI" type="terminal" description="The terminal to close.">
+                <cocoa key="terminal"/>
             </parameter>
         </command>
 
@@ -110,6 +117,24 @@
                 <cocoa key="terminal"/>
             </parameter>
             <result type="boolean" description="Whether the command was invoked."/>
+        </command>
+
+        <command name="split" code="Ghstsplt" description="Split a terminal.">
+            <cocoa class="SplitCommand"/>
+            <parameter name="direction" code="SpDi" type="split direction" description="The split direction.">
+                <cocoa key="direction"/>
+            </parameter>
+            <parameter name="in" code="SpIn" type="terminal" description="The terminal to split.">
+                <cocoa key="terminal"/>
+            </parameter>
+            <result type="terminal" description="The new terminal in the split."/>
+        </command>
+
+        <command name="clear screen" code="Ghstcler" description="Clear the terminal screen.">
+            <cocoa class="ClearCommand"/>
+            <parameter name="in" code="ClIn" type="terminal" description="The terminal to clear.">
+                <cocoa key="terminal"/>
+            </parameter>
         </command>
     </suite>
 </dictionary>
