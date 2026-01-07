@@ -26,8 +26,15 @@ class NewTerminalCommand: NSScriptCommand {
 
         // Set command if provided (as initial input so shell scripts run first)
         if let commandText, !commandText.isEmpty {
-            config.initialInput = "\(commandText); exit\n"
-            config.waitAfterCommand = wait
+            // Only append "; exit" if wait is false (default behavior)
+            // If wait is true, let the command run interactively
+            if wait {
+                config.initialInput = "\(commandText)\n"
+                config.waitAfterCommand = true
+            } else {
+                config.initialInput = "\(commandText); exit\n"
+                config.waitAfterCommand = false
+            }
         }
 
         // Set working directory if provided (expand ~ to home directory)
