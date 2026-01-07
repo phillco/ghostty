@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<dictionary title="Ghostty Terminology">
+    <suite name="Standard Suite" code="????" description="Common commands.">
+        <command name="quit" code="aevtquit" description="Quit.">
+            <cocoa class="NSQuitCommand"/>
+        </command>
+
+        <enumeration name="terminal kind" code="TKnd">
+            <enumerator name="normal" code="norm" description="A normal terminal window or tab."/>
+            <enumerator name="quick" code="qtrm" description="The quick terminal."/>
+        </enumeration>
+
+        <enumeration name="terminal location" code="TLoc">
+            <enumerator name="window" code="winv" description="Open in a new window."/>
+            <enumerator name="tab" code="tabv" description="Open in a new tab."/>
+        </enumeration>
+
+        <class name="terminal" code="Term" plural="terminals" description="A terminal session.">
+            <cocoa class="ScriptableTerminal"/>
+            <property name="id" code="idnt" type="text" access="r" description="Unique identifier.">
+                <cocoa key="uniqueID"/>
+            </property>
+            <property name="title" code="pnam" type="text" access="r" description="Terminal title.">
+                <cocoa key="title"/>
+            </property>
+            <property name="working directory" code="pwdd" type="text" access="r" description="Current working directory.">
+                <cocoa key="workingDirectory"/>
+            </property>
+            <property name="contents" code="pcnt" type="text" access="r" description="Screen contents.">
+                <cocoa key="contents"/>
+            </property>
+            <property name="kind" code="TKnd" type="terminal kind" access="r" description="Terminal kind.">
+                <cocoa key="kind"/>
+            </property>
+        </class>
+
+        <class name="application" code="capp" description="Application.">
+            <cocoa class="NSApplication"/>
+            <property name="name" code="pnam" type="text" access="r" description="Name.">
+                <cocoa key="name"/>
+            </property>
+            <property name="version" code="vers" type="text" access="r" description="Version.">
+                <cocoa key="version"/>
+            </property>
+            <element type="terminal" access="r">
+                <cocoa key="terminals"/>
+            </element>
+        </class>
+    </suite>
+
+    <suite name="Ghostty Suite" code="Ghst" description="Ghostty terminal commands.">
+        <command name="new terminal" code="Ghstntrm" description="Create a new terminal.">
+            <cocoa class="NewTerminalCommand"/>
+            <parameter name="location" code="TLoc" type="terminal location" optional="yes" description="Where to open (window or tab).">
+                <cocoa key="location"/>
+            </parameter>
+            <parameter name="command" code="Tcmd" type="text" optional="yes" description="Command to run.">
+                <cocoa key="command"/>
+            </parameter>
+            <parameter name="directory" code="Tdir" type="text" optional="yes" description="Working directory.">
+                <cocoa key="directory"/>
+            </parameter>
+            <parameter name="wait" code="Twat" type="boolean" optional="yes" description="Keep terminal open after command exits.">
+                <cocoa key="wait"/>
+            </parameter>
+            <result type="terminal" description="The new terminal."/>
+        </command>
+
+        <command name="send text" code="Ghstsntx" description="Send text to a terminal.">
+            <cocoa class="SendTextCommand"/>
+            <direct-parameter type="text" description="The text to send."/>
+            <parameter name="to" code="Ttrm" type="terminal" description="The target terminal.">
+                <cocoa key="terminal"/>
+            </parameter>
+        </command>
+
+        <command name="focus terminal" code="Ghstfcus" description="Focus a terminal.">
+            <cocoa class="FocusCommand"/>
+            <parameter name="id" code="Ftid" type="text" description="The terminal ID to focus.">
+                <cocoa key="terminalID"/>
+            </parameter>
+        </command>
+
+        <command name="close terminal" code="Ghstclse" description="Close a terminal.">
+            <cocoa class="CloseTerminalCommand"/>
+            <parameter name="id" code="Ctid" type="text" description="The terminal ID to close.">
+                <cocoa key="terminalID"/>
+            </parameter>
+        </command>
+
+        <command name="open quick terminal" code="Ghstqtrm" description="Open the quick terminal.">
+            <cocoa class="QuickTerminalCommand"/>
+            <result type="terminal" description="The quick terminal."/>
+        </command>
+
+        <command name="perform action" code="Ghstpfac" description="Perform a keybind action.">
+            <cocoa class="PerformActionCommand"/>
+            <direct-parameter type="text" description="The action to perform (e.g., 'copy:clipboard', 'split:right')."/>
+            <parameter name="in" code="Ptrm" type="terminal" description="The terminal to perform the action in.">
+                <cocoa key="terminal"/>
+            </parameter>
+            <result type="boolean" description="Whether the action was performed."/>
+        </command>
+
+        <command name="invoke command" code="Ghstinvc" description="Invoke a command palette action.">
+            <cocoa class="InvokeCommandCommand"/>
+            <direct-parameter type="text" description="The command action to invoke."/>
+            <parameter name="in" code="Itrm" type="terminal" description="The terminal to invoke the command in.">
+                <cocoa key="terminal"/>
+            </parameter>
+            <result type="boolean" description="Whether the command was invoked."/>
+        </command>
+    </suite>
+</dictionary>
