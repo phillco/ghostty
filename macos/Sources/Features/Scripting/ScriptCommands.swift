@@ -7,19 +7,41 @@ import Foundation
 @objc(NewTerminalCommand)
 class NewTerminalCommand: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
-        // Get the Ghostty app instance
+        // Parse parameters before suspending (evaluatedArguments must be accessed synchronously)
+        let location = evaluatedArguments?["location"] as? FourCharCode
+        let commandText = evaluatedArguments?["command"] as? String
+        let directory = evaluatedArguments?["directory"] as? String
+        let wait = evaluatedArguments?["wait"] as? Bool ?? false
+
+        // Suspend the script command for async execution
+        suspendExecution()
+
+        Task { @MainActor in
+            let result = await performAsync(
+                location: location,
+                commandText: commandText,
+                directory: directory,
+                wait: wait
+            )
+            self.resumeExecution(withResult: result)
+        }
+
+        return nil
+    }
+
+    @MainActor
+    private func performAsync(
+        location: FourCharCode?,
+        commandText: String?,
+        directory: String?,
+        wait: Bool
+    ) async -> ScriptableTerminal? {
         guard let appDelegate = NSApp.delegate as? AppDelegate else {
             scriptErrorNumber = -1728
             scriptErrorString = "Ghostty is not available"
             return nil
         }
         let ghostty = appDelegate.ghostty
-
-        // Parse parameters
-        let location = evaluatedArguments?["location"] as? FourCharCode
-        let commandText = evaluatedArguments?["command"] as? String
-        let directory = evaluatedArguments?["directory"] as? String
-        let wait = evaluatedArguments?["wait"] as? Bool ?? false
 
         // Build configuration
         var config = Ghostty.SurfaceConfiguration()
@@ -42,48 +64,37 @@ class NewTerminalCommand: NSScriptCommand {
             config.workingDirectory = NSString(string: directory).expandingTildeInPath
         }
 
-        // Execute on main thread and return result
+        // Determine if creating window or tab
+        let isTab = location == FourCharCode(0x74616276) // 'tabv'
+
         var resultTerminal: ScriptableTerminal?
 
-        let work = { [location, config] in
-            // Determine if creating window or tab
-            let isTab = location == FourCharCode(0x74616276) // 'tabv'
-
-            if isTab {
-                // Create new tab using preferredParent (same pattern as App Intents)
-                if let controller = TerminalController.newTab(
-                    ghostty,
-                    from: TerminalController.preferredParent?.window,
-                    withBaseConfig: config
-                ) {
-                    if let view = controller.surfaceTree.root?.leftmostLeaf() {
-                        resultTerminal = ScriptableTerminal(view)
-                    }
-                }
-            } else {
-                // Create new window (default)
-                let controller = TerminalController.newWindow(
-                    ghostty,
-                    withBaseConfig: config,
-                    withParent: nil
-                )
+        if isTab {
+            // Create new tab using preferredParent (same pattern as App Intents)
+            if let controller = TerminalController.newTab(
+                ghostty,
+                from: TerminalController.preferredParent?.window,
+                withBaseConfig: config
+            ) {
                 if let view = controller.surfaceTree.root?.leftmostLeaf() {
                     resultTerminal = ScriptableTerminal(view)
                 }
             }
-
-            // Activate the app
-            if !NSApp.isActive {
-                NSApp.activate(ignoringOtherApps: true)
+        } else {
+            // Create new window (default)
+            let controller = TerminalController.newWindow(
+                ghostty,
+                withBaseConfig: config,
+                withParent: nil
+            )
+            if let view = controller.surfaceTree.root?.leftmostLeaf() {
+                resultTerminal = ScriptableTerminal(view)
             }
         }
 
-        if Thread.isMainThread {
-            work()
-        } else {
-            DispatchQueue.main.sync {
-                work()
-            }
+        // Activate the app
+        if !NSApp.isActive {
+            NSApp.activate(ignoringOtherApps: true)
         }
 
         return resultTerminal
@@ -110,34 +121,27 @@ class SendTextCommand: NSScriptCommand {
             return nil
         }
 
-        // Send the text - must be on main actor
-        var success = false
-        if Thread.isMainThread {
-            success = MainActor.assumeIsolated {
-                guard let surface = terminal.surfaceView?.surfaceModel else {
-                    return false
-                }
-                surface.sendText(text)
-                return true
-            }
-        } else {
-            DispatchQueue.main.sync {
-                success = MainActor.assumeIsolated {
-                    guard let surface = terminal.surfaceView?.surfaceModel else {
-                        return false
-                    }
-                    surface.sendText(text)
-                    return true
-                }
-            }
-        }
+        suspendExecution()
 
-        if !success {
-            scriptErrorNumber = -1728
-            scriptErrorString = "Terminal not found or no longer exists"
+        Task { @MainActor in
+            let success = await performAsync(text: text, terminal: terminal)
+            if !success {
+                self.scriptErrorNumber = -1728
+                self.scriptErrorString = "Terminal not found or no longer exists"
+            }
+            self.resumeExecution(withResult: nil)
         }
 
         return nil
+    }
+
+    @MainActor
+    private func performAsync(text: String, terminal: ScriptableTerminal) async -> Bool {
+        guard let surface = terminal.surfaceView?.surfaceModel else {
+            return false
+        }
+        surface.sendText(text)
+        return true
     }
 }
 
@@ -154,43 +158,41 @@ class FocusCommand: NSScriptCommand {
             return nil
         }
 
-        let work = { () -> Bool in
-            guard let surfaceView = terminal.surfaceView else {
-                return false
+        suspendExecution()
+
+        Task { @MainActor in
+            let success = await performAsync(terminal: terminal)
+            if !success {
+                self.scriptErrorNumber = -1728
+                self.scriptErrorString = "Terminal not found or no longer exists"
             }
-            guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
-                return false
-            }
-
-            // Focus the surface within the controller
-            controller.focusSurface(surfaceView)
-
-            // Bring the window to front
-            surfaceView.window?.makeKeyAndOrderFront(nil)
-
-            // Activate the app
-            if !NSApp.isActive {
-                NSApp.activate(ignoringOtherApps: true)
-            }
-
-            return true
-        }
-
-        var success = false
-        if Thread.isMainThread {
-            success = work()
-        } else {
-            DispatchQueue.main.sync {
-                success = work()
-            }
-        }
-
-        if !success {
-            scriptErrorNumber = -1728
-            scriptErrorString = "Terminal not found or no longer exists"
+            self.resumeExecution(withResult: nil)
         }
 
         return nil
+    }
+
+    @MainActor
+    private func performAsync(terminal: ScriptableTerminal) async -> Bool {
+        guard let surfaceView = terminal.surfaceView else {
+            return false
+        }
+        guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
+            return false
+        }
+
+        // Focus the surface within the controller
+        controller.focusSurface(surfaceView)
+
+        // Bring the window to front
+        surfaceView.window?.makeKeyAndOrderFront(nil)
+
+        // Activate the app
+        if !NSApp.isActive {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        return true
     }
 }
 
@@ -207,34 +209,32 @@ class CloseTerminalCommand: NSScriptCommand {
             return nil
         }
 
-        let work = { () -> Bool in
-            guard let surfaceView = terminal.surfaceView else {
-                return false
-            }
-            guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
-                return false
-            }
+        suspendExecution()
 
-            // Close without confirmation (AppleScript operations should be non-interactive)
-            controller.closeSurface(surfaceView, withConfirmation: false)
-            return true
-        }
-
-        var success = false
-        if Thread.isMainThread {
-            success = work()
-        } else {
-            DispatchQueue.main.sync {
-                success = work()
+        Task { @MainActor in
+            let success = await performAsync(terminal: terminal)
+            if !success {
+                self.scriptErrorNumber = -1728
+                self.scriptErrorString = "Terminal not found or no longer exists"
             }
-        }
-
-        if !success {
-            scriptErrorNumber = -1728
-            scriptErrorString = "Terminal not found or no longer exists"
+            self.resumeExecution(withResult: nil)
         }
 
         return nil
+    }
+
+    @MainActor
+    private func performAsync(terminal: ScriptableTerminal) async -> Bool {
+        guard let surfaceView = terminal.surfaceView else {
+            return false
+        }
+        guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
+            return false
+        }
+
+        // Close without confirmation (AppleScript operations should be non-interactive)
+        controller.closeSurface(surfaceView, withConfirmation: false)
+        return true
     }
 }
 
@@ -244,34 +244,35 @@ class CloseTerminalCommand: NSScriptCommand {
 @objc(QuickTerminalCommand)
 class QuickTerminalCommand: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
-        var resultTerminal: ScriptableTerminal?
+        suspendExecution()
 
-        let work = {
-            guard let delegate = NSApp.delegate as? AppDelegate else {
-                return
-            }
-
-            // Open the quick terminal
-            let controller = delegate.quickController
-            controller.animateIn()
-
-            // Get the terminal from the quick controller
-            if let view = controller.surfaceTree.root?.leftmostLeaf() {
-                resultTerminal = ScriptableTerminal(view)
-            }
-
-            // Activate the app
-            if !NSApp.isActive {
-                NSApp.activate(ignoringOtherApps: true)
-            }
+        Task { @MainActor in
+            let result = await performAsync()
+            self.resumeExecution(withResult: result)
         }
 
-        if Thread.isMainThread {
-            work()
-        } else {
-            DispatchQueue.main.sync {
-                work()
-            }
+        return nil
+    }
+
+    @MainActor
+    private func performAsync() async -> ScriptableTerminal? {
+        guard let delegate = NSApp.delegate as? AppDelegate else {
+            return nil
+        }
+
+        // Open the quick terminal
+        let controller = delegate.quickController
+        controller.animateIn()
+
+        // Get the terminal from the quick controller
+        var resultTerminal: ScriptableTerminal?
+        if let view = controller.surfaceTree.root?.leftmostLeaf() {
+            resultTerminal = ScriptableTerminal(view)
+        }
+
+        // Activate the app
+        if !NSApp.isActive {
+            NSApp.activate(ignoringOtherApps: true)
         }
 
         return resultTerminal
@@ -298,30 +299,26 @@ class PerformActionCommand: NSScriptCommand {
             return false
         }
 
-        var result = false
-        let work = {
-            result = MainActor.assumeIsolated {
-                guard let surface = terminal.surfaceView?.surfaceModel else {
-                    return false
-                }
-                return surface.perform(action: action)
+        suspendExecution()
+
+        Task { @MainActor in
+            let result = await performAsync(action: action, terminal: terminal)
+            if !result {
+                self.scriptErrorNumber = -1728
+                self.scriptErrorString = "Action could not be performed"
             }
+            self.resumeExecution(withResult: result)
         }
 
-        if Thread.isMainThread {
-            work()
-        } else {
-            DispatchQueue.main.sync {
-                work()
-            }
-        }
+        return nil
+    }
 
-        if !result {
-            scriptErrorNumber = -1728
-            scriptErrorString = "Action could not be performed"
+    @MainActor
+    private func performAsync(action: String, terminal: ScriptableTerminal) async -> Bool {
+        guard let surface = terminal.surfaceView?.surfaceModel else {
+            return false
         }
-
-        return result
+        return surface.perform(action: action)
     }
 }
 
@@ -345,31 +342,27 @@ class InvokeCommandCommand: NSScriptCommand {
             return false
         }
 
-        var result = false
-        let work = {
-            result = MainActor.assumeIsolated {
-                guard let surface = terminal.surfaceView?.surfaceModel else {
-                    return false
-                }
-                // Command palette actions use the same perform mechanism as keybinds
-                return surface.perform(action: action)
+        suspendExecution()
+
+        Task { @MainActor in
+            let result = await performAsync(action: action, terminal: terminal)
+            if !result {
+                self.scriptErrorNumber = -1728
+                self.scriptErrorString = "Command could not be invoked"
             }
+            self.resumeExecution(withResult: result)
         }
 
-        if Thread.isMainThread {
-            work()
-        } else {
-            DispatchQueue.main.sync {
-                work()
-            }
-        }
+        return nil
+    }
 
-        if !result {
-            scriptErrorNumber = -1728
-            scriptErrorString = "Command could not be invoked"
+    @MainActor
+    private func performAsync(action: String, terminal: ScriptableTerminal) async -> Bool {
+        guard let surface = terminal.surfaceView?.surfaceModel else {
+            return false
         }
-
-        return result
+        // Command palette actions use the same perform mechanism as keybinds
+        return surface.perform(action: action)
     }
 }
 
@@ -408,44 +401,35 @@ class SplitCommand: NSScriptCommand {
             direction = "right"
         }
 
-        var resultTerminal: ScriptableTerminal?
+        suspendExecution()
 
-        let work = {
-            MainActor.assumeIsolated {
-                guard let surface = terminal.surfaceView?.surfaceModel else {
-                    return
-                }
-
-                // Get terminal count before split
-                let terminalsBefore = TerminalRegistry.shared.allTerminals
-
-                // Perform the split action
-                _ = surface.perform(action: "new_split:\(direction)")
-
-                // Small delay to let the split complete, then find the new terminal
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    let terminalsAfter = TerminalRegistry.shared.allTerminals
-                    // Find the new terminal (one that wasn't in the before list)
-                    let beforeIDs = Set(terminalsBefore.map { $0.id })
-                    if let newTerminal = terminalsAfter.first(where: { !beforeIDs.contains($0.id) }) {
-                        resultTerminal = newTerminal
-                    }
-                }
-            }
+        Task { @MainActor in
+            let result = await performAsync(terminal: terminal, direction: direction)
+            self.resumeExecution(withResult: result)
         }
 
-        if Thread.isMainThread {
-            work()
-        } else {
-            DispatchQueue.main.sync {
-                work()
-            }
+        return nil
+    }
+
+    @MainActor
+    private func performAsync(terminal: ScriptableTerminal, direction: String) async -> ScriptableTerminal? {
+        guard let surface = terminal.surfaceView?.surfaceModel else {
+            return nil
         }
 
-        // Wait a bit for the async result
-        Thread.sleep(forTimeInterval: 0.2)
+        // Get terminal count before split
+        let terminalsBefore = TerminalRegistry.shared.allTerminals
 
-        return resultTerminal
+        // Perform the split action
+        _ = surface.perform(action: "new_split:\(direction)")
+
+        // Wait a bit for the split to complete
+        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+
+        // Find the new terminal (one that wasn't in the before list)
+        let terminalsAfter = TerminalRegistry.shared.allTerminals
+        let beforeIDs = Set(terminalsBefore.map { $0.id })
+        return terminalsAfter.first(where: { !beforeIDs.contains($0.id) })
     }
 }
 
@@ -462,31 +446,25 @@ class ClearCommand: NSScriptCommand {
             return nil
         }
 
-        var success = false
-        let work = {
-            success = MainActor.assumeIsolated {
-                guard let surface = terminal.surfaceView?.surfaceModel else {
-                    return false
-                }
-                return surface.perform(action: "clear_screen")
-            }
-        }
+        suspendExecution()
 
-        if Thread.isMainThread {
-            work()
-        } else {
-            DispatchQueue.main.sync {
-                work()
+        Task { @MainActor in
+            let success = await performAsync(terminal: terminal)
+            if !success {
+                self.scriptErrorNumber = -1728
+                self.scriptErrorString = "Could not clear terminal"
             }
-        }
-
-        if !success {
-            scriptErrorNumber = -1728
-            scriptErrorString = "Could not clear terminal"
+            self.resumeExecution(withResult: nil)
         }
 
         return nil
     }
+
+    @MainActor
+    private func performAsync(terminal: ScriptableTerminal) async -> Bool {
+        guard let surface = terminal.surfaceView?.surfaceModel else {
+            return false
+        }
+        return surface.perform(action: "clear_screen")
+    }
 }
-
-

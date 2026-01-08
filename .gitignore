@@ -24,3 +24,7 @@ glad.zip
 /ghostty.qcow2
 
 vgcore.*
+
+# Issue investigation docs
+initial_input_validation_bug.md
+applescript_crash_bug_report.md
