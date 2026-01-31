@@ -1875,6 +1875,13 @@ pub const Text = struct {
     }
 };
 
+/// A selection range expressed as UTF-8 byte offsets into the flattened
+/// screen text (see `selectionString`).
+pub const SelectionRange = struct {
+    start: usize,
+    len: usize,
+};
+
 /// Grab the value of text at the given selection point. Note that the
 /// selection structure is used as a way to determine the area of the
 /// screen to read from, it doesn't have to match the user's current
@@ -2026,6 +2033,99 @@ pub fn selectionString(self: *Surface, alloc: Allocator) !?[:0]const u8 {
         .sel = sel,
         .trim = false,
     });
+}
+
+/// Returns the current selection range as UTF-8 byte offsets into the
+/// flattened screen text (see `selectionString`).
+pub fn selectionRange(self: *Surface) !?SelectionRange {
+    self.renderer_state.mutex.lock();
+    defer self.renderer_state.mutex.unlock();
+
+    const screen: *terminal.Screen = self.io.terminal.screens.active;
+    const sel = screen.selection orelse return null;
+
+    const full_sel = terminal.Selection.init(
+        screen.pages.getTopLeft(.screen),
+        screen.pages.getBottomRight(.screen) orelse return null,
+        false,
+    );
+
+    var map: terminal.StringMap = undefined;
+    const text = try screen.selectionString(self.alloc, .{
+        .sel = full_sel,
+        .trim = false,
+        .map = &map,
+    });
+    defer self.alloc.free(text);
+    defer map.deinit(self.alloc);
+
+    const start_pin = sel.topLeft(screen);
+    const end_pin = sel.bottomRight(screen);
+
+    var start_idx: ?usize = null;
+    var end_idx: ?usize = null;
+    for (map.map, 0..) |pin, idx| {
+        if (start_idx == null and pin.node == start_pin.node and pin.x == start_pin.x and pin.y == start_pin.y) {
+            start_idx = idx;
+        }
+        if (pin.node == end_pin.node and pin.x == end_pin.x and pin.y == end_pin.y) {
+            end_idx = idx;
+        }
+    }
+
+    if (start_idx == null or end_idx == null) return null;
+    if (end_idx.? < start_idx.?) return null;
+
+    return .{
+        .start = start_idx.?,
+        .len = end_idx.? - start_idx.? + 1,
+    };
+}
+
+/// Set the selection range using UTF-8 byte offsets into the flattened
+/// screen text (see `selectionString`). Returns false if the range is
+/// out of bounds.
+pub fn setSelectionRange(self: *Surface, start: usize, len: usize) !bool {
+    self.renderer_state.mutex.lock();
+    var did_set = false;
+    defer if (did_set) self.queueRender() catch |err| {
+        log.warn("failed to queue render after selection range update err={}", .{err});
+    };
+    defer self.renderer_state.mutex.unlock();
+
+    if (len == 0) {
+        try self.setSelection(null);
+        did_set = true;
+        return true;
+    }
+
+    const screen: *terminal.Screen = self.io.terminal.screens.active;
+    const full_sel = terminal.Selection.init(
+        screen.pages.getTopLeft(.screen),
+        screen.pages.getBottomRight(.screen) orelse return false,
+        false,
+    );
+
+    var map: terminal.StringMap = undefined;
+    const text = try screen.selectionString(self.alloc, .{
+        .sel = full_sel,
+        .trim = false,
+        .map = &map,
+    });
+    defer self.alloc.free(text);
+    defer map.deinit(self.alloc);
+
+    if (map.map.len == 0) return false;
+    if (start >= map.map.len) return false;
+
+    const end_unclamped = start + len - 1;
+    const end = if (end_unclamped < map.map.len) end_unclamped else map.map.len - 1;
+    const start_pin = map.map[start];
+    const end_pin = map.map[end];
+
+    try self.setSelection(terminal.Selection.init(start_pin, end_pin, false));
+    did_set = true;
+    return true;
 }
 
 /// Returns the pwd of the terminal, if any. This is always copied because
