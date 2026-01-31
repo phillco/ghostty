@@ -455,6 +455,16 @@ typedef struct {
   uintptr_t text_len;
 } ghostty_text_s;
 
+typedef struct {
+  uint32_t location;
+  uint32_t length;
+} ghostty_selection_range_s;
+
+typedef struct {
+  uint32_t row;
+  uint32_t col;
+} ghostty_cursor_position_s;
+
 typedef enum {
   GHOSTTY_POINT_ACTIVE,
   GHOSTTY_POINT_VIEWPORT,
@@ -1235,11 +1245,18 @@ GHOSTTY_API void ghostty_surface_complete_clipboard_request(
 GHOSTTY_API void ghostty_surface_deny_clipboard_request(ghostty_surface_t,
                                                            void*);
 GHOSTTY_API bool ghostty_surface_has_selection(ghostty_surface_t);
+GHOSTTY_API bool ghostty_surface_selection_range(ghostty_surface_t,
+                                               ghostty_selection_range_s*);
+GHOSTTY_API bool ghostty_surface_set_selection_range(ghostty_surface_t,
+                                                   uint32_t,
+                                                   uint32_t);
 GHOSTTY_API bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_s*);
 GHOSTTY_API bool ghostty_surface_read_text(ghostty_surface_t,
                                               ghostty_selection_s,
                                               ghostty_text_s*);
 GHOSTTY_API void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
+GHOSTTY_API bool ghostty_surface_cursor_position(ghostty_surface_t,
+                                               ghostty_cursor_position_s*);
 
 #ifdef __APPLE__
 GHOSTTY_API void ghostty_surface_set_display_id(ghostty_surface_t, uint32_t);
