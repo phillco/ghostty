@@ -1279,6 +1279,18 @@ pub const CAPI = struct {
         }
     };
 
+    // ghostty_selection_range_s
+    const SelectionRange = extern struct {
+        location: u32,
+        length: u32,
+    };
+
+    // ghostty_cursor_position_s
+    const CursorPosition = extern struct {
+        row: u32,
+        col: u32,
+    };
+
     // ghostty_point_s
     const Point = extern struct {
         tag: Tag,
@@ -1579,6 +1591,40 @@ pub const CAPI = struct {
         return surface.core_surface.hasSelection();
     }
 
+    /// Returns the selection range as UTF-8 byte offsets into the flattened
+    /// screen text. Returns false if there is no selection.
+    export fn ghostty_surface_selection_range(
+        surface: *Surface,
+        result: *SelectionRange,
+    ) bool {
+        const range = surface.core_surface.selectionRange() catch |err| {
+            log.warn("error reading selection range err={}", .{err});
+            return false;
+        } orelse return false;
+
+        result.* = .{
+            .location = @intCast(range.start),
+            .length = @intCast(range.len),
+        };
+        return true;
+    }
+
+    /// Sets the selection range using UTF-8 byte offsets into the flattened
+    /// screen text. Returns false if the range is out of bounds.
+    export fn ghostty_surface_set_selection_range(
+        surface: *Surface,
+        location: u32,
+        length: u32,
+    ) bool {
+        return surface.core_surface.setSelectionRange(
+            @intCast(location),
+            @intCast(length),
+        ) catch |err| {
+            log.warn("error setting selection range err={}", .{err});
+            return false;
+        };
+    }
+
     /// Same as ghostty_surface_read_text but reads from the user selection,
     /// if any.
     export fn ghostty_surface_read_selection(
@@ -1594,6 +1640,23 @@ pub const CAPI = struct {
 
         // Read the text from the selection.
         return readTextLocked(surface, core_sel, result);
+    }
+
+    /// Returns the current cursor position in screen coordinates (row, col).
+    export fn ghostty_surface_cursor_position(
+        surface: *Surface,
+        result: *CursorPosition,
+    ) bool {
+        const core_surface = &surface.core_surface;
+        core_surface.renderer_state.mutex.lock();
+        defer core_surface.renderer_state.mutex.unlock();
+
+        const cursor = core_surface.renderer_state.terminal.screens.active.cursor;
+        result.* = .{
+            .row = @intCast(cursor.y),
+            .col = @intCast(cursor.x),
+        };
+        return true;
     }
 
     /// Read some arbitrary text from the surface.

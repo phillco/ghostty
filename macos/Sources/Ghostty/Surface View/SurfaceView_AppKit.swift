@@ -2147,6 +2147,10 @@ extension Ghostty.SurfaceView {
 // MARK: Accessibility
 
 extension Ghostty.SurfaceView {
+    private static let accessibilityCursorPositionAttribute = NSAccessibility.Attribute(
+        rawValue: "AXGhosttyCursorPosition"
+    )
+
     /// Indicates that this view should be exposed to accessibility tools like VoiceOver.
     /// By returning true, we make the terminal surface accessible to screen readers
     /// and other assistive technologies.
@@ -2174,7 +2178,17 @@ extension Ghostty.SurfaceView {
     /// This allows VoiceOver and other assistive technologies to understand
     /// what text the user has selected.
     override func accessibilitySelectedTextRange() -> NSRange {
-        return selectedRange()
+        guard let surface = self.surface else { return NSRange() }
+
+        var selectionRange = ghostty_selection_range_s()
+        guard ghostty_surface_selection_range(surface, &selectionRange) else { return NSRange() }
+
+        let content = cachedScreenContents.get()
+        return nsRangeFromUTF8Offsets(
+            location: Int(selectionRange.location),
+            length: Int(selectionRange.length),
+            in: content
+        )
     }
 
     /// Returns the currently selected text as a string.
@@ -2195,21 +2209,23 @@ extension Ghostty.SurfaceView {
     /// This helps assistive technologies understand the size of the content.
     override func accessibilityNumberOfCharacters() -> Int {
         let content = cachedScreenContents.get()
-        return content.count
+        return content.utf16.count
     }
 
     /// Returns the visible character range for the terminal.
     /// For terminals, we typically show all content as visible.
     override func accessibilityVisibleCharacterRange() -> NSRange {
         let content = cachedScreenContents.get()
-        return NSRange(location: 0, length: content.count)
+        return NSRange(location: 0, length: content.utf16.count)
     }
 
     /// Returns the line number for a given character index.
     /// This helps assistive technologies navigate by line.
     override func accessibilityLine(for index: Int) -> Int {
         let content = cachedScreenContents.get()
-        let substring = String(content.prefix(index))
+        let clampedIndex = max(0, min(index, content.utf16.count))
+        let endIndex = String.Index(utf16Offset: clampedIndex, in: content)
+        let substring = String(content[..<endIndex])
         return substring.components(separatedBy: .newlines).count - 1
     }
 
@@ -2242,6 +2258,125 @@ extension Ghostty.SurfaceView {
         }
 
         return NSAttributedString(string: plainString, attributes: attributes)
+    }
+
+    override func setAccessibilitySelectedTextRange(_ range: NSRange) {
+        guard let surface = self.surface else { return }
+        let content = cachedScreenContents.get()
+
+        guard let offsets = utf8Offsets(from: range, in: content) else { return }
+        _ = ghostty_surface_set_selection_range(
+            surface,
+            UInt32(offsets.location),
+            UInt32(offsets.length)
+        )
+    }
+
+    override func setAccessibilitySelectedText(_ selectedText: String?) {
+        let text = selectedText ?? ""
+
+        if text.isEmpty {
+            if let surface = self.surface {
+                _ = ghostty_surface_set_selection_range(surface, 0, 0)
+            }
+            return
+        }
+
+        surfaceModel?.sendText(text)
+
+        if let surface = self.surface {
+            _ = ghostty_surface_set_selection_range(surface, 0, 0)
+        }
+    }
+
+    override func accessibilityAttributeNames() -> [NSAccessibility.Attribute] {
+        var attrs = super.accessibilityAttributeNames()
+        attrs.append(Self.accessibilityCursorPositionAttribute)
+        return attrs
+    }
+
+    override func accessibilitySetValue(_ value: Any?, forAttribute attribute: NSAccessibility.Attribute) {
+        switch attribute {
+        case .selectedTextRange:
+            if let nsValue = value as? NSValue {
+                setAccessibilitySelectedTextRange(nsValue.rangeValue)
+            } else if let value {
+                let cfValue: CFTypeRef = value as CFTypeRef
+                if CFGetTypeID(cfValue) == AXValueGetTypeID() {
+                    let axValue = unsafeBitCast(cfValue, to: AXValue.self)
+                    var cfRange = CFRange()
+                    if AXValueGetValue(axValue, .cfRange, &cfRange) {
+                        let range = NSRange(location: cfRange.location, length: cfRange.length)
+                        setAccessibilitySelectedTextRange(range)
+                    }
+                }
+            }
+
+        case .selectedText:
+            setAccessibilitySelectedText(value as? String)
+
+        default:
+            super.accessibilitySetValue(value, forAttribute: attribute)
+        }
+    }
+
+    override func accessibilityAttributeValue(_ attribute: NSAccessibility.Attribute) -> Any? {
+        if attribute == Self.accessibilityCursorPositionAttribute {
+            guard let surface = self.surface else { return nil }
+            var pos = ghostty_cursor_position_s()
+            guard ghostty_surface_cursor_position(surface, &pos) else { return nil }
+            return [
+                "row": NSNumber(value: pos.row),
+                "col": NSNumber(value: pos.col),
+            ]
+        }
+
+        return super.accessibilityAttributeValue(attribute)
+    }
+
+    override func accessibilityIsAttributeSettable(_ attribute: NSAccessibility.Attribute) -> Bool {
+        if attribute == .selectedTextRange || attribute == .selectedText { return true }
+        if attribute == Self.accessibilityCursorPositionAttribute { return false }
+        return super.accessibilityIsAttributeSettable(attribute)
+    }
+
+    private func nsRangeFromUTF8Offsets(
+        location: Int,
+        length: Int,
+        in content: String
+    ) -> NSRange {
+        guard location >= 0, length >= 0 else { return NSRange() }
+        guard let startUtf8 = content.utf8.index(
+            content.utf8.startIndex,
+            offsetBy: location,
+            limitedBy: content.utf8.endIndex
+        ) else { return NSRange() }
+        guard let endUtf8 = content.utf8.index(
+            startUtf8,
+            offsetBy: length,
+            limitedBy: content.utf8.endIndex
+        ) else { return NSRange() }
+        guard let startIndex = startUtf8.samePosition(in: content),
+              let endIndex = endUtf8.samePosition(in: content) else {
+            return NSRange()
+        }
+
+        return NSRange(startIndex..<endIndex, in: content)
+    }
+
+    private func utf8Offsets(
+        from range: NSRange,
+        in content: String
+    ) -> (location: Int, length: Int)? {
+        guard let stringRange = Range(range, in: content) else { return nil }
+        guard let startUtf8 = stringRange.lowerBound.samePosition(in: content.utf8),
+              let endUtf8 = stringRange.upperBound.samePosition(in: content.utf8) else {
+            return nil
+        }
+
+        let location = content.utf8.distance(from: content.utf8.startIndex, to: startUtf8)
+        let end = content.utf8.distance(from: content.utf8.startIndex, to: endUtf8)
+        return (location, end - location)
     }
 
 }
