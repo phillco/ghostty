@@ -7,7 +7,7 @@ import GhosttyKit
 
 extension Ghostty {
     /// The NSView implementation for a terminal surface.
-    class SurfaceView: OSView, ObservableObject, Codable, Identifiable {
+    class SurfaceView: OSView, ObservableObject, Codable, Identifiable, NSAccessibilityNavigableStaticText {
         typealias ID = UUID
 
         /// Unique ID per surface
@@ -2170,7 +2170,8 @@ extension Ghostty.SurfaceView {
         return "Terminal content area"
     }
 
-    override func accessibilityValue() -> Any? {
+    @objc(accessibilityValue)
+    func accessibilityValue() -> String? {
         return cachedScreenContents.get()
     }
 
@@ -2229,6 +2230,12 @@ extension Ghostty.SurfaceView {
         return substring.components(separatedBy: .newlines).count - 1
     }
 
+    /// Returns the character range for a given line number.
+    override func accessibilityRange(forLine lineNumber: Int) -> NSRange {
+        let content = cachedScreenContents.get()
+        return utf16Range(forLine: lineNumber, in: content)
+    }
+
     /// Returns a substring for the given range.
     /// This allows assistive technologies to read specific portions of the content.
     override func accessibilityString(for range: NSRange) -> String? {
@@ -2258,6 +2265,64 @@ extension Ghostty.SurfaceView {
         }
 
         return NSAttributedString(string: plainString, attributes: attributes)
+    }
+
+    /// Returns the bounds of the given text range in screen coordinates.
+    override func accessibilityFrame(for range: NSRange) -> NSRect {
+        guard self.surface != nil else { return NSMakeRect(frame.origin.x, frame.origin.y, 0, 0) }
+
+        let content = cachedScreenContents.get()
+        let clampedRange = clampedUTF16Range(range, in: content)
+        guard let origin = gridOrigin() else {
+            return NSMakeRect(frame.origin.x, frame.origin.y, 0, 0)
+        }
+
+        let columns = Int(surfaceSize?.columns ?? 0)
+        let positions = utf16LineColumns(for: clampedRange, in: content, columns: columns)
+        let cellWidth = Double(cellSize.width)
+        let cellHeight = Double(cellSize.height)
+        guard cellWidth > 0, cellHeight > 0 else { return NSMakeRect(frame.origin.x, frame.origin.y, 0, 0) }
+
+        let startLine = positions.startLine
+        let startCol = positions.startCol
+        let endLine = positions.endLine
+        let endCol = positions.endCol
+
+        var x = origin.x
+        var y = origin.y
+        var width = 0.0
+        var height = cellHeight
+
+        if clampedRange.length == 0 {
+            x = origin.x + (Double(startCol) * cellWidth)
+            y = origin.y + (Double(startLine) * cellHeight)
+            width = 0
+        } else if startLine == endLine {
+            let colStart = min(startCol, endCol)
+            let colEnd = max(startCol, endCol)
+            x = origin.x + (Double(colStart) * cellWidth)
+            y = origin.y + (Double(startLine) * cellHeight)
+            width = max(0, Double(colEnd - colStart) * cellWidth)
+        } else {
+            let minLine = min(startLine, endLine)
+            let maxLine = max(startLine, endLine)
+            x = origin.x
+            y = origin.y + (Double(minLine) * cellHeight)
+            height = Double(maxLine - minLine + 1) * cellHeight
+
+            let widthCols = columns > 0 ? columns : max(startCol, endCol)
+            width = Double(widthCols) * cellWidth
+        }
+
+        let viewRect = NSMakeRect(
+            x,
+            frame.size.height - (y + height),
+            width,
+            height)
+
+        let winRect = self.convert(viewRect, to: nil)
+        guard let window = self.window else { return winRect }
+        return window.convertToScreen(winRect)
     }
 
     override func setAccessibilitySelectedTextRange(_ range: NSRange) {
@@ -2293,6 +2358,28 @@ extension Ghostty.SurfaceView {
         var attrs = super.accessibilityAttributeNames()
         attrs.append(Self.accessibilityCursorPositionAttribute)
         return attrs
+    }
+
+    @objc(accessibilityParameterizedAttributeNames)
+    override func accessibilityParameterizedAttributeNames() -> [NSAccessibility.ParameterizedAttribute] {
+        var attrs = super.accessibilityParameterizedAttributeNames()
+        attrs.append(.boundsForRange)
+        return attrs
+    }
+
+    @objc(accessibilityAttributeValue:forParameter:)
+    override func accessibilityAttributeValue(
+        _ attribute: NSAccessibility.ParameterizedAttribute,
+        forParameter parameter: Any?
+    ) -> Any? {
+        if attribute == .boundsForRange {
+            if let range = (parameter as? NSValue)?.rangeValue {
+                return NSValue(rect: accessibilityFrame(for: range))
+            }
+            return NSValue(rect: NSMakeRect(frame.origin.x, frame.origin.y, 0, 0))
+        }
+
+        return super.accessibilityAttributeValue(attribute, forParameter: parameter)
     }
 
     override func accessibilitySetValue(_ value: Any?, forAttribute attribute: NSAccessibility.Attribute) {
@@ -2377,6 +2464,132 @@ extension Ghostty.SurfaceView {
         let location = content.utf8.distance(from: content.utf8.startIndex, to: startUtf8)
         let end = content.utf8.distance(from: content.utf8.startIndex, to: endUtf8)
         return (location, end - location)
+    }
+
+    private func clampedUTF16Range(_ range: NSRange, in content: String) -> NSRange {
+        let total = content.utf16.count
+        let location = max(0, min(range.location, total))
+        let end = max(location, min(range.location + range.length, total))
+        return NSRange(location: location, length: end - location)
+    }
+
+    private func utf16LineColumns(
+        for range: NSRange,
+        in content: String,
+        columns: Int
+    ) -> (startLine: Int, startCol: Int, endLine: Int, endCol: Int) {
+        let startOffset = range.location
+        let endOffset = range.location + range.length
+
+        var line = 0
+        var col = 0
+        var index = 0
+
+        var startLine = 0
+        var startCol = 0
+        var endLine = 0
+        var endCol = 0
+        var hasStart = false
+        var hasEnd = false
+
+        for unit in content.utf16 {
+            if !hasStart, index == startOffset {
+                startLine = line
+                startCol = col
+                hasStart = true
+            }
+            if !hasEnd, index == endOffset {
+                endLine = line
+                endCol = col
+                hasEnd = true
+                break
+            }
+
+            if unit == 10 { // "\n"
+                line += 1
+                col = 0
+            } else {
+                col += 1
+                if columns > 0, col >= columns {
+                    line += 1
+                    col = 0
+                }
+            }
+            index += 1
+        }
+
+        if !hasStart {
+            startLine = line
+            startCol = col
+        }
+        if !hasEnd {
+            endLine = line
+            endCol = col
+        }
+
+        return (startLine, startCol, endLine, endCol)
+    }
+
+    private func utf16Range(
+        forLine lineNumber: Int,
+        in content: String
+    ) -> NSRange {
+        guard lineNumber >= 0 else { return NSRange(location: NSNotFound, length: 0) }
+
+        var line = 0
+        var index = 0
+        var lineStart = 0
+        var foundStart = false
+
+        for unit in content.utf16 {
+            if !foundStart, line == lineNumber {
+                lineStart = index
+                foundStart = true
+            }
+
+            if unit == 10 { // "\n"
+                if line == lineNumber {
+                    return NSRange(location: lineStart, length: index - lineStart)
+                }
+                line += 1
+            }
+
+            index += 1
+        }
+
+        if line == lineNumber {
+            if !foundStart {
+                lineStart = index
+            }
+            return NSRange(location: lineStart, length: index - lineStart)
+        }
+
+        return NSRange(location: NSNotFound, length: 0)
+    }
+
+    private func gridOrigin() -> (x: Double, y: Double)? {
+        guard let surface = self.surface else { return nil }
+        let cellWidth = Double(cellSize.width)
+        let cellHeight = Double(cellSize.height)
+        guard cellWidth > 0, cellHeight > 0 else { return nil }
+
+        var pos = ghostty_cursor_position_s()
+        guard ghostty_surface_cursor_position(surface, &pos) else { return nil }
+
+        var imeX: Double = 0
+        var imeY: Double = 0
+        var imeWidth: Double = 0
+        var imeHeight: Double = 0
+        ghostty_surface_ime_point(surface, &imeX, &imeY, &imeWidth, &imeHeight)
+        _ = imeWidth
+        _ = imeHeight
+
+        let cursorCol = Double(pos.col)
+        let cursorRow = Double(pos.row)
+
+        let originX = imeX - (cursorCol * cellWidth) - (cellWidth / 2)
+        let originY = imeY - (cursorRow * cellHeight) - cellHeight
+        return (originX, originY)
     }
 
 }
