@@ -1976,11 +1976,21 @@ pub const CAPI = struct {
         core_surface.renderer_state.mutex.lockUncancelable(global.io());
         defer core_surface.renderer_state.mutex.unlock(global.io());
 
-        const cursor = core_surface.renderer_state.terminal.screens.active.cursor;
-        result.* = .{
-            .row = @intCast(cursor.y),
-            .col = @intCast(cursor.x),
-        };
+        const screen: *terminal.Screen = core_surface.renderer_state.terminal.screens.active;
+        const cursor = screen.cursor;
+        // Derive coordinates from the tracked pin to avoid stale cursor x/y.
+        if (screen.pages.pointFromPin(.active, cursor.page_pin.*)) |pt| {
+            const coord = pt.coord();
+            result.* = .{
+                .row = coord.y,
+                .col = @intCast(coord.x),
+            };
+        } else {
+            result.* = .{
+                .row = @intCast(cursor.y),
+                .col = @intCast(cursor.x),
+            };
+        }
         return true;
     }
 
