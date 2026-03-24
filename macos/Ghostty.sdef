@@ -90,6 +90,9 @@
         <cocoa key="title"/>
       </property>
       <property name="working directory" code="Gwdr" type="text" access="r" description="Current working directory for the terminal process."/>
+      <property name="tab color" code="GTcL" type="tab color" access="rw" description="Current tab color for the containing terminal window.">
+        <cocoa key="tabColor"/>
+      </property>
       <responds-to command="split">
         <cocoa method="handleSplitCommand:"/>
       </responds-to>
@@ -128,6 +131,19 @@
       <enumerator name="left" code="GSlf" description="Split to the left."/>
       <enumerator name="down" code="GSdn" description="Split downward."/>
       <enumerator name="up" code="GSup" description="Split upward."/>
+    </enumeration>
+
+    <enumeration name="tab color" code="GTcE" description="A terminal tab color.">
+      <enumerator name="none" code="none" description="No tab color."/>
+      <enumerator name="blue" code="blue" description="Blue tab color."/>
+      <enumerator name="purple" code="prpl" description="Purple tab color."/>
+      <enumerator name="pink" code="pink" description="Pink tab color."/>
+      <enumerator name="red" code="red " description="Red tab color."/>
+      <enumerator name="orange" code="orng" description="Orange tab color."/>
+      <enumerator name="yellow" code="ylow" description="Yellow tab color."/>
+      <enumerator name="green" code="gren" description="Green tab color."/>
+      <enumerator name="teal" code="teal" description="Teal tab color."/>
+      <enumerator name="graphite" code="grph" description="Graphite tab color."/>
     </enumeration>
 
     <enumeration name="input action" code="GIAc" description="Whether an input is pressed or released.">
