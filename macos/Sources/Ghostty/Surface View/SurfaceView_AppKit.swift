@@ -238,6 +238,13 @@ extension Ghostty {
         // Timer to remove progress report after 15 seconds
         private var progressReportTimer: Timer?
 
+        // Polls for accessibility state changes so we can emit notifications
+        // for caret/selection/value updates.
+        private var accessibilityNotificationTimer: Timer?
+        private var lastAccessibilitySelectedTextRange: NSRange?
+        private var lastAccessibilityCursorPosition: ghostty_cursor_position_s?
+        private var lastAccessibilityValueFingerprint: Int?
+
         // This is the title from the terminal. This is nil if we're currently using
         // the terminal title as the main title property. If the title is set manually
         // by the user, this is set to the prior value (which may be empty, but non-nil).
@@ -405,6 +412,8 @@ extension Ghostty {
 
             // The UTTypes that can be dragged onto this view.
             registerForDraggedTypes(Array(Self.dropTypes))
+
+            startAccessibilityNotificationMonitoring()
         }
 
         required init?(coder: NSCoder) {
@@ -436,6 +445,9 @@ extension Ghostty {
 
             // Cancel progress report timer
             progressReportTimer?.invalidate()
+
+            // Cancel accessibility notification timer
+            accessibilityNotificationTimer?.invalidate()
         }
 
         func focusDidChange(_ focused: Bool) {
@@ -500,6 +512,63 @@ extension Ghostty {
                 // thread. This caused a crash on macOS <= 14.
                 self.surfaceSize = size
             }
+        }
+
+        private func startAccessibilityNotificationMonitoring() {
+            accessibilityNotificationTimer?.invalidate()
+            accessibilityNotificationTimer = Timer.scheduledTimer(
+                withTimeInterval: 0.2,
+                repeats: true
+            ) { [weak self] _ in
+                self?.postAccessibilityNotificationsIfNeeded()
+            }
+        }
+
+        private func postAccessibilityNotificationsIfNeeded() {
+            guard let surface = self.surface else { return }
+            guard focused else { return }
+
+            let selectedRange = accessibilitySelectedTextRange()
+
+            var cursorPos = ghostty_cursor_position_s()
+            let hasCursorPos = ghostty_surface_cursor_position(surface, &cursorPos)
+
+            let content = cachedScreenContents.get()
+            let valueFingerprint = content.utf16.count ^ content.hashValue
+
+            if let prior = lastAccessibilitySelectedTextRange {
+                let selectedRangeChanged = !NSEqualRanges(prior, selectedRange)
+                let cursorChanged: Bool = {
+                    guard hasCursorPos else { return false }
+                    guard let last = lastAccessibilityCursorPosition else { return false }
+                    return last.row != cursorPos.row || last.col != cursorPos.col
+                }()
+
+                if selectedRangeChanged || cursorChanged {
+                    NSAccessibility.post(element: self, notification: .selectedTextChanged)
+                }
+            }
+
+            if let prior = lastAccessibilityValueFingerprint, prior != valueFingerprint {
+                NSAccessibility.post(element: self, notification: .valueChanged)
+            }
+
+            lastAccessibilitySelectedTextRange = selectedRange
+            lastAccessibilityCursorPosition = hasCursorPos ? cursorPos : nil
+            lastAccessibilityValueFingerprint = valueFingerprint
+        }
+
+        private func focusFollowsMouseIfNeeded() {
+            guard let window,
+                  let controller = window.windowController as? BaseTerminalController,
+                  controller.focusFollowsMouse,
+                  window.isKeyWindow,
+                  !controller.commandPaletteIsShowing,
+                  !focused,
+                  NSEvent.pressedMouseButtons == 0
+            else { return }
+
+            Ghostty.moveFocus(to: self)
         }
 
         func setCursorShape(_ shape: ghostty_action_mouse_shape_e) {
@@ -979,6 +1048,7 @@ extension Ghostty {
                 mods: .init(nsFlags: event.modifierFlags)
             )
             surfaceModel.sendMousePos(mouseEvent)
+            focusFollowsMouseIfNeeded()
         }
 
         override func mouseExited(with event: NSEvent) {
@@ -1015,16 +1085,7 @@ extension Ghostty {
                 mods: .init(nsFlags: event.modifierFlags)
             )
             surfaceModel.sendMousePos(mouseEvent)
-
-            // Handle focus-follows-mouse
-            if let window,
-               let controller = window.windowController as? BaseTerminalController,
-               !controller.commandPaletteIsShowing,
-               window.isKeyWindow &&
-                    !self.focused &&
-                    controller.focusFollowsMouse {
-                Ghostty.moveFocus(to: self)
-            }
+            focusFollowsMouseIfNeeded()
         }
 
         override func mouseDragged(with event: NSEvent) {
@@ -2240,14 +2301,29 @@ extension Ghostty.SurfaceView {
         guard let surface = self.surface else { return NSRange() }
 
         var selectionRange = ghostty_selection_range_s()
-        guard ghostty_surface_selection_range(surface, &selectionRange) else { return NSRange() }
-
         let content = cachedScreenContents.get()
-        return nsRangeFromUTF8Offsets(
-            location: Int(selectionRange.location),
-            length: Int(selectionRange.length),
-            in: content
-        )
+
+        if ghostty_surface_selection_range(surface, &selectionRange) {
+            return nsRangeFromUTF8Offsets(
+                location: Int(selectionRange.location),
+                length: Int(selectionRange.length),
+                in: content
+            )
+        }
+
+        // No selection: expose a zero-length range at the caret so assistive
+        // technologies can announce the actual insertion point.
+        var cursorPos = ghostty_cursor_position_s()
+        guard ghostty_surface_cursor_position(surface, &cursorPos) else { return NSRange() }
+
+        let lineRange = utf16Range(forLine: Int(cursorPos.row), in: content)
+        guard lineRange.location != NSNotFound else {
+            return NSRange(location: content.utf16.count, length: 0)
+        }
+
+        let col = max(0, Int(cursorPos.col))
+        let location = lineRange.location + min(col, lineRange.length)
+        return NSRange(location: location, length: 0)
     }
 
     /// Returns the currently selected text as a string.
@@ -2393,6 +2469,7 @@ extension Ghostty.SurfaceView {
             UInt32(offsets.location),
             UInt32(offsets.length)
         )
+        postAccessibilityNotificationsIfNeeded()
     }
 
     override func setAccessibilitySelectedText(_ selectedText: String?) {
@@ -2402,6 +2479,7 @@ extension Ghostty.SurfaceView {
             if let surface = self.surface {
                 _ = ghostty_surface_set_selection_range(surface, 0, 0)
             }
+            postAccessibilityNotificationsIfNeeded()
             return
         }
 
@@ -2410,6 +2488,7 @@ extension Ghostty.SurfaceView {
         if let surface = self.surface {
             _ = ghostty_surface_set_selection_range(surface, 0, 0)
         }
+        postAccessibilityNotificationsIfNeeded()
     }
 
     override func accessibilityAttributeNames() -> [NSAccessibility.Attribute] {

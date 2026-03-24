@@ -53,6 +53,24 @@ final class ScriptTerminal: NSObject {
         return surfaceView?.pwd ?? ""
     }
 
+    /// Exposed as the AppleScript `tab color` property.
+    @objc(tabColor)
+    var tabColor: FourCharCode {
+        get {
+            guard NSApp.isAppleScriptEnabled else { return TerminalTabColor.none.appleScriptCode }
+            guard let terminalWindow = surfaceView?.window as? TerminalWindow else {
+                return TerminalTabColor.none.appleScriptCode
+            }
+            return terminalWindow.tabColor.appleScriptCode
+        }
+        set {
+            guard NSApp.isAppleScriptEnabled else { return }
+            guard let tabColor = TerminalTabColor(appleScriptCode: newValue) else { return }
+            guard let terminalWindow = surfaceView?.window as? TerminalWindow else { return }
+            terminalWindow.tabColor = tabColor
+        }
+    }
+
     /// Used by command handling (`perform action ... on <terminal>`).
     func perform(action: String) -> Bool {
         guard NSApp.isAppleScriptEnabled else { return false }
