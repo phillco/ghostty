@@ -105,6 +105,60 @@ enum TerminalTabColor: Int, CaseIterable, Codable {
     }
 }
 
+extension TerminalTabColor {
+    var appleScriptCode: FourCharCode {
+        switch self {
+        case .none:
+            return FourCharCode(0x6E6F6E65) // 'none'
+        case .blue:
+            return FourCharCode(0x626C7565) // 'blue'
+        case .purple:
+            return FourCharCode(0x7072706C) // 'prpl'
+        case .pink:
+            return FourCharCode(0x70696E6B) // 'pink'
+        case .red:
+            return FourCharCode(0x72656420) // 'red '
+        case .orange:
+            return FourCharCode(0x6F726E67) // 'orng'
+        case .yellow:
+            return FourCharCode(0x796C6F77) // 'ylow'
+        case .green:
+            return FourCharCode(0x6772656E) // 'gren'
+        case .teal:
+            return FourCharCode(0x7465616C) // 'teal'
+        case .graphite:
+            return FourCharCode(0x67727068) // 'grph'
+        }
+    }
+
+    init?(appleScriptCode: FourCharCode) {
+        switch appleScriptCode {
+        case 0x6E6F6E65: // 'none'
+            self = .none
+        case 0x626C7565: // 'blue'
+            self = .blue
+        case 0x7072706C: // 'prpl'
+            self = .purple
+        case 0x70696E6B: // 'pink'
+            self = .pink
+        case 0x72656420: // 'red '
+            self = .red
+        case 0x6F726E67: // 'orng'
+            self = .orange
+        case 0x796C6F77: // 'ylow'
+            self = .yellow
+        case 0x6772656E: // 'gren'
+            self = .green
+        case 0x7465616C: // 'teal'
+            self = .teal
+        case 0x67727068: // 'grph'
+            self = .graphite
+        default:
+            return nil
+        }
+    }
+}
+
 // MARK: - Menu View
 
 /// A SwiftUI view displaying a color palette for tab color selection.
