@@ -1687,6 +1687,10 @@ extension Ghostty {
             menu.addItem(.separator())
             item = menu.addItem(withTitle: "Close Split", action: #selector(closeSurface(_:)), keyEquivalent: "")
             item.setImageIfDesired(systemSymbolName: "xmark.rectangle")
+            item = menu.addItem(withTitle: "Move Split to New Tab", action: #selector(moveSplitToNewTabFromContextMenu(_:)), keyEquivalent: "")
+            item.setImageIfDesired(systemSymbolName: "uiwindow.split.2x1")
+            item = menu.addItem(withTitle: "Move Split to New Window", action: #selector(moveSplitToNewWindowFromContextMenu(_:)), keyEquivalent: "")
+            item.setImageIfDesired(systemSymbolName: "macwindow")
 
             menu.addItem(.separator())
             item = menu.addItem(withTitle: "Reset Terminal", action: #selector(resetTerminal(_:)), keyEquivalent: "")
@@ -1820,6 +1824,16 @@ extension Ghostty {
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
                 AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
+        }
+
+        @IBAction func moveSplitToNewTabFromContextMenu(_ sender: Any?) {
+            guard let controller = window?.windowController as? TerminalController else { return }
+            _ = controller.promoteSurfaceToNewTab(self)
+        }
+
+        @IBAction func moveSplitToNewWindowFromContextMenu(_ sender: Any?) {
+            guard let controller = window?.windowController as? BaseTerminalController else { return }
+            _ = controller.promoteSurfaceToNewWindow(self)
         }
 
         @objc func resetTerminal(_ sender: Any) {
@@ -2345,6 +2359,16 @@ extension Ghostty.SurfaceView: NSMenuItemValidation {
             } else {
                 return false
             }
+        case #selector(moveSplitToNewWindowFromContextMenu):
+            if let controller = window?.windowController as? TerminalController {
+                return controller.canPromoteSurfaceToNewWindow(self)
+            }
+            guard let controller = window?.windowController as? BaseTerminalController else { return false }
+            return controller.canMoveSplitToNewWindow(self)
+
+        case #selector(moveSplitToNewTabFromContextMenu):
+            guard let controller = window?.windowController as? TerminalController else { return false }
+            return controller.canMoveSplitToNewTab(self)
 
         default:
             return true
@@ -2772,6 +2796,7 @@ extension Ghostty.SurfaceView {
             }
 
             if unit == 10 { // "\n"
+            if unit == 10 { // "\n"
                 line += 1
                 col = 0
             } else {
@@ -2813,6 +2838,7 @@ extension Ghostty.SurfaceView {
                 foundStart = true
             }
 
+            if unit == 10 { // "\n"
             if unit == 10 { // "\n"
                 if line == lineNumber {
                     return NSRange(location: lineStart, length: index - lineStart)
@@ -2857,7 +2883,6 @@ extension Ghostty.SurfaceView {
         let originY = imeY - (cursorRow * cellHeight) - cellHeight
         return (originX, originY)
     }
-
 }
 
 /// Caches a value for some period of time, evicting it automatically when that time expires.
