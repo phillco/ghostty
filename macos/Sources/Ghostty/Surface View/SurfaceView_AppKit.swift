@@ -2796,7 +2796,6 @@ extension Ghostty.SurfaceView {
             }
 
             if unit == 10 { // "\n"
-            if unit == 10 { // "\n"
                 line += 1
                 col = 0
             } else {
@@ -2838,7 +2837,6 @@ extension Ghostty.SurfaceView {
                 foundStart = true
             }
 
-            if unit == 10 { // "\n"
             if unit == 10 { // "\n"
                 if line == lineNumber {
                     return NSRange(location: lineStart, length: index - lineStart)
