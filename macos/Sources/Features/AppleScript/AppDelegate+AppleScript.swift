@@ -293,6 +293,32 @@ extension NSApplication {
     }
 }
 
+enum ScriptPromotionDestination {
+    case separateTab
+    case newWindow
+
+    init?(value: Any) {
+        let code: UInt32
+        switch value {
+        case let enumCode as UInt32:
+            code = enumCode
+        case let number as NSNumber:
+            code = number.uint32Value
+        default:
+            return nil
+        }
+
+        switch code {
+        case "GPtb".fourCharCode:
+            self = .separateTab
+        case "GPwn".fourCharCode:
+            self = .newWindow
+        default:
+            return nil
+        }
+    }
+}
+
 // MARK: - Private Helpers
 
 @MainActor

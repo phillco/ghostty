@@ -489,6 +489,18 @@
                                     </items>
                                 </menu>
                             </menuItem>
+                            <menuItem title="Move Split to New Tab" id="6Rq-rM-rfM">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="moveSplitToNewTab:" target="-1" id="EcT-Hc-SZh"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="Move Split to New Window" id="PdG-ic-0Rx">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="moveSplitToNewWindow:" target="-1" id="d6A-7K-e9q"/>
+                                </connections>
+                            </menuItem>
                             <menuItem isSeparatorItem="YES" id="dgt-Tx-d4e"/>
                             <menuItem title="Return To Default Size" id="Gbx-Vi-OGC" userLabel="Return To Default Size">
                                 <modifierMask key="keyEquivalentModifierMask"/>
