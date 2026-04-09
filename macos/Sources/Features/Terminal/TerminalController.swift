@@ -370,12 +370,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     static func newTab(
         _ ghostty: Ghostty.App,
         from parent: NSWindow? = nil,
-        withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil
+        withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil,
+        withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil
     ) -> TerminalController? {
         // Making sure that we're dealing with a TerminalController. If not,
         // then we just create a new window.
         guard let parent,
               let parentController = parent.windowController as? TerminalController else {
+            if let tree {
+                return newWindow(ghostty, tree: tree)
+            }
+
             return newWindow(ghostty, withBaseConfig: baseConfig, withParent: parent)
         }
 
@@ -393,7 +398,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
 
         // Create a new window and add it to the parent
-        let controller = TerminalController.init(ghostty, withBaseConfig: baseConfig)
+        let controller = TerminalController.init(
+            ghostty,
+            withBaseConfig: baseConfig,
+            withSurfaceTree: tree)
         guard let window = controller.window else { return controller }
 
         // If the parent is miniaturized, then macOS exhibits really strange behaviors
@@ -483,12 +491,56 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                     _ = TerminalController.newTab(
                         ghostty,
                         from: parent,
-                        withBaseConfig: baseConfig)
+                        withBaseConfig: baseConfig,
+                        withSurfaceTree: tree)
                 }
             }
         }
 
         return controller
+    }
+
+    /// Detach a split pane into its own native tab in the current window's tab group.
+    ///
+    /// Returns the newly created tab controller, or `nil` if the target surface
+    /// isn't part of this tree, is already the only pane, or tabs can't be
+    /// attached in the current window state.
+    @discardableResult
+    func promoteSurfaceToNewTab(_ target: Ghostty.SurfaceView) -> TerminalController? {
+        guard let parentWindow = window else { return nil }
+        guard parentWindow.tabbingMode != .disallowed else { return nil }
+
+        if let fullscreenStyle, fullscreenStyle.isFullscreen && !fullscreenStyle.supportsTabs {
+            return nil
+        }
+
+        undoManager?.beginUndoGrouping()
+        undoManager?.setActionName("Move Split")
+        defer {
+            undoManager?.endUndoGrouping()
+        }
+
+        guard let detachedTree = detachSurfaceToOwnTree(target) else { return nil }
+        return Self.newTab(
+            ghostty,
+            from: parentWindow,
+            withSurfaceTree: detachedTree)
+    }
+
+    @discardableResult
+    override func promoteSurfaceToNewWindow(
+        _ target: Ghostty.SurfaceView,
+        position: NSPoint? = nil
+    ) -> TerminalController? {
+        if surfaceTree.isSplit {
+            return super.promoteSurfaceToNewWindow(target, position: position)
+        }
+
+        guard canPromoteSurfaceToNewWindow(target) else { return nil }
+        guard let window else { return nil }
+
+        window.moveTabToNewWindow(nil)
+        return self
     }
 
     // MARK: - Methods
@@ -1578,6 +1630,38 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
 // MARK: NSMenuItemValidation
 
 extension TerminalController {
+    func canPromoteSurfaceToNewWindow(_ target: Ghostty.SurfaceView) -> Bool {
+        if canMoveSplitToNewWindow(target) {
+            return true
+        }
+
+        guard surfaceTree.contains(target) else { return false }
+        guard let window else { return false }
+        return window.tabGroup?.windows.count ?? 0 > 1
+    }
+
+    var canPromoteFocusedSurfaceToNewWindow: Bool {
+        guard let focusedSurface else { return false }
+        return canPromoteSurfaceToNewWindow(focusedSurface)
+    }
+
+    func canMoveSplitToNewTab(_ target: Ghostty.SurfaceView) -> Bool {
+        guard canMoveSplitToNewWindow(target) else { return false }
+        guard let parentWindow = window else { return false }
+        guard parentWindow.tabbingMode != .disallowed else { return false }
+
+        if let fullscreenStyle, fullscreenStyle.isFullscreen && !fullscreenStyle.supportsTabs {
+            return false
+        }
+
+        return true
+    }
+
+    var canMoveFocusedSplitToNewTab: Bool {
+        guard let focusedSurface else { return false }
+        return canMoveSplitToNewTab(focusedSurface)
+    }
+
     override func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(closeTabsOnTheRight):

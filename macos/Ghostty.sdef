@@ -96,6 +96,12 @@
       <responds-to command="split">
         <cocoa method="handleSplitCommand:"/>
       </responds-to>
+      <responds-to command="promote to separate tab">
+        <cocoa method="handlePromoteToSeparateTabCommand:"/>
+      </responds-to>
+      <responds-to command="promote to new window">
+        <cocoa method="handlePromoteToNewWindowCommand:"/>
+      </responds-to>
       <responds-to command="focus">
         <cocoa method="handleFocusCommand:"/>
       </responds-to>
@@ -178,6 +184,16 @@
         <cocoa key="configuration"/>
       </parameter>
       <result type="surface configuration" description="The newly created surface configuration."/>
+    </command>
+
+    <command name="promote to separate tab" code="GhstPrTb" description="Move a split terminal into its own tab.">
+      <direct-parameter type="specifier" description="The terminal to move."/>
+      <result type="terminal" description="The promoted terminal."/>
+    </command>
+
+    <command name="promote to new window" code="GhstPrWn" description="Move a terminal into its own window, detaching a single-pane tab when needed.">
+      <direct-parameter type="specifier" description="The terminal to move."/>
+      <result type="terminal" description="The promoted terminal."/>
     </command>
 
     <command name="new window" code="GhstNWin" description="Create a new Ghostty window.">

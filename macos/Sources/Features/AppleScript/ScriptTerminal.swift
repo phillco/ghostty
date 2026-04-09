@@ -133,6 +133,61 @@ final class ScriptTerminal: NSObject {
         return ScriptTerminal(surfaceView: newView)
     }
 
+    /// Handler for `promote to separate tab <terminal>`.
+    @objc(handlePromoteToSeparateTabCommand:)
+    func handlePromoteToSeparateTab(_ command: NSScriptCommand) -> Any? {
+        handlePromote(command, destination: .separateTab)
+    }
+
+    /// Handler for `promote to new window <terminal>`.
+    @objc(handlePromoteToNewWindowCommand:)
+    func handlePromoteToNewWindow(_ command: NSScriptCommand) -> Any? {
+        handlePromote(command, destination: .newWindow)
+    }
+
+    private func handlePromote(
+        _ command: NSScriptCommand,
+        destination: ScriptPromotionDestination
+    ) -> Any? {
+        guard NSApp.validateScript(command: command) else { return nil }
+
+        guard let surfaceView else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal surface is no longer available."
+            return nil
+        }
+
+        switch destination {
+        case .newWindow:
+            guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
+                command.scriptErrorNumber = errAEEventFailed
+                command.scriptErrorString = "Terminal is not in a movable window."
+                return nil
+            }
+
+            guard controller.promoteSurfaceToNewWindow(surfaceView) != nil else {
+                command.scriptErrorNumber = errAEEventFailed
+                command.scriptErrorString = "Terminal must be part of a split or in a multi-tab window to move it into a new window."
+                return nil
+            }
+
+        case .separateTab:
+            guard let controller = surfaceView.window?.windowController as? TerminalController else {
+                command.scriptErrorNumber = errAEEventFailed
+                command.scriptErrorString = "Terminal is not in a standard tabbed window."
+                return nil
+            }
+
+            guard controller.promoteSurfaceToNewTab(surfaceView) != nil else {
+                command.scriptErrorNumber = errAEEventFailed
+                command.scriptErrorString = "Terminal must be part of a split in a tab-capable window to move it into a separate tab."
+                return nil
+            }
+        }
+
+        return ScriptTerminal(surfaceView: surfaceView)
+    }
+
     /// Handler for `focus <terminal>`.
     @objc(handleFocusCommand:)
     func handleFocus(_ command: NSScriptCommand) -> Any? {

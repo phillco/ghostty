@@ -269,6 +269,29 @@ class BaseTerminalController: NSWindowController,
         return newView
     }
 
+    /// Detach a split pane into its own standalone window.
+    ///
+    /// Returns the newly created terminal controller, or `nil` if the target
+    /// surface isn't part of this tree or is already the only pane.
+    @discardableResult
+    func promoteSurfaceToNewWindow(
+        _ target: Ghostty.SurfaceView,
+        position: NSPoint? = nil
+    ) -> TerminalController? {
+        undoManager?.beginUndoGrouping()
+        undoManager?.setActionName("Move Split")
+        defer {
+            undoManager?.endUndoGrouping()
+        }
+
+        guard let detachedTree = detachSurfaceToOwnTree(target) else { return nil }
+        return TerminalController.newWindow(
+            ghostty,
+            tree: detachedTree,
+            position: position,
+            confirmUndo: false)
+    }
+
     /// Move focus to a surface view.
     func focusSurface(_ view: Ghostty.SurfaceView) {
         // Check if target surface is in our tree
@@ -736,38 +759,9 @@ class BaseTerminalController: NSWindowController,
 
     @objc private func ghosttySurfaceDragEndedNoTarget(_ notification: Notification) {
         guard let target = notification.object as? Ghostty.SurfaceView else { return }
-        guard let targetNode = surfaceTree.root?.node(view: target) else { return }
-
-        // If our tree isn't split, then we never create a new window, because
-        // it is already a single split.
-        guard surfaceTree.isSplit else { return }
-
-        // If we are removing our focused surface then we move it. We need to
-        // keep track of our old one so undo sends focus back to the right place.
-        let oldFocusedSurface = focusedSurface
-        if focusedSurface == target {
-            focusedSurface = findNextFocusTargetAfterClosing(node: targetNode)
-        }
-
-        // Remove the surface from our tree
-        let removedTree = surfaceTree.removing(targetNode)
-
-        // Create a new tree with the dragged surface and open a new window
-        let newTree = SplitTree<Ghostty.SurfaceView>(view: target)
-
-        // Treat our undo below as a full group.
-        undoManager?.beginUndoGrouping()
-        undoManager?.setActionName("Move Split")
-        defer {
-            undoManager?.endUndoGrouping()
-        }
-
-        replaceSurfaceTree(removedTree, moveFocusFrom: oldFocusedSurface)
-        _ = TerminalController.newWindow(
-            ghostty,
-            tree: newTree,
-            position: notification.userInfo?[Notification.Name.ghosttySurfaceDragEndedNoTargetPointKey] as? NSPoint,
-            confirmUndo: false)
+        _ = promoteSurfaceToNewWindow(
+            target,
+            position: notification.userInfo?[Notification.Name.ghosttySurfaceDragEndedNoTargetPointKey] as? NSPoint)
     }
 
     // MARK: Local Events
@@ -797,6 +791,27 @@ class BaseTerminalController: NSWindowController,
         }
 
         return event
+    }
+
+    /// Removes a pane from the current split tree and returns it as a new
+    /// single-pane tree for reuse in a new tab or window.
+    ///
+    /// Callers are responsible for wrapping this in any desired undo grouping
+    /// before creating the destination container.
+    func detachSurfaceToOwnTree(_ target: Ghostty.SurfaceView) -> SplitTree<Ghostty.SurfaceView>? {
+        guard let targetNode = surfaceTree.root?.node(view: target) else { return nil }
+        guard surfaceTree.isSplit else { return nil }
+
+        let oldFocusedSurface = focusedSurface
+        if focusedSurface == target {
+            focusedSurface = findNextFocusTargetAfterClosing(node: targetNode)
+        }
+
+        replaceSurfaceTree(
+            surfaceTree.removing(targetNode),
+            moveFocusFrom: oldFocusedSurface)
+
+        return SplitTree<Ghostty.SurfaceView>(view: target)
     }
 
     // MARK: TerminalViewDelegate
@@ -1321,6 +1336,17 @@ class BaseTerminalController: NSWindowController,
         ghostty.split(surface: surface, direction: GHOSTTY_SPLIT_DIRECTION_UP)
     }
 
+    @IBAction func moveSplitToNewWindow(_ sender: Any?) {
+        guard let focusedSurface else { return }
+        _ = promoteSurfaceToNewWindow(focusedSurface)
+    }
+
+    @IBAction func moveSplitToNewTab(_ sender: Any?) {
+        guard let focusedSurface,
+              let controller = self as? TerminalController else { return }
+        _ = controller.promoteSurfaceToNewTab(focusedSurface)
+    }
+
     @IBAction func splitZoom(_ sender: Any) {
         guard let surface = focusedSurface?.surface else { return }
         ghostty.splitToggleZoom(surface: surface)
@@ -1456,6 +1482,16 @@ extension BaseTerminalController: NSMenuItemValidation {
         case #selector(findHide):
             return focusedSurface?.searchState != nil
 
+        case #selector(moveSplitToNewWindow):
+            if let controller = self as? TerminalController {
+                return controller.canPromoteFocusedSurfaceToNewWindow
+            }
+            return canMoveFocusedSplitToNewWindow
+
+        case #selector(moveSplitToNewTab):
+            guard let controller = self as? TerminalController else { return false }
+            return controller.canMoveFocusedSplitToNewTab
+
         default:
             return true
         }
@@ -1496,6 +1532,16 @@ extension BaseTerminalController: NSMenuItemValidation {
 // MARK: Combine Methods
 
 extension BaseTerminalController {
+    func canMoveSplitToNewWindow(_ target: Ghostty.SurfaceView) -> Bool {
+        guard surfaceTree.isSplit else { return false }
+        return surfaceTree.contains(target)
+    }
+
+    var canMoveFocusedSplitToNewWindow: Bool {
+        guard let focusedSurface else { return false }
+        return canMoveSplitToNewWindow(focusedSurface)
+    }
+
     /// Publishes an app-wide notification whenever this terminal window's aggregate
     /// bell state changes.
     private func setupBellNotificationPublisher() {
