@@ -69,11 +69,6 @@ class TitlebarTabsVenturaTerminalWindow: TerminalWindow {
         tab.attributedTitle = attributedTitle
     }
 
-    override func sendEvent(_ event: NSEvent) {
-        if tabBarView != nil && handleTabBarMiddleClick(event) { return }
-        super.sendEvent(event)
-    }
-
 	override func layoutIfNeeded() {
 		super.layoutIfNeeded()
 
@@ -692,6 +687,11 @@ private class CenteredDynamicLabel: NSTextField {
         // Set content hugging and compression resistance priorities
         setContentHuggingPriority(.defaultLow, for: .horizontal)
         setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+    }
+
+    /// Click through, so we can double click here to enlarge current window
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
     }
 
     // Vertically center the text
