@@ -2304,6 +2304,10 @@ extension Ghostty.SurfaceView {
         return .textArea
     }
 
+    override func accessibilityIdentifier() -> String {
+        return "ghostty-surface:\(id.uuidString)"
+    }
+
     override func accessibilityHelp() -> String? {
         return "Terminal content area"
     }
