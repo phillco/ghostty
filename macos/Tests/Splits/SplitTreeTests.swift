@@ -223,6 +223,53 @@ struct SplitTreeTests {
         #expect(abs(s.ratio - expectedRatio) < 0.001)
     }
 
+    @Test func resizingFocusedPaneSetsLeftPanePercentageDirectly() throws {
+        let (tree, view1, _) = try makeHorizontalSplit()
+
+        let resized = try tree.resizingFocusedPane(node: .leaf(view: view1), to: 0.3)
+
+        guard case .split(let s) = resized.root else {
+            Issue.record("unexpected node type")
+            return
+        }
+        #expect(abs(s.ratio - 0.3) < 0.001)
+    }
+
+    @Test func resizingFocusedPaneUsesRemainderForRightPane() throws {
+        let (tree, _, view2) = try makeHorizontalSplit()
+
+        let resized = try tree.resizingFocusedPane(node: .leaf(view: view2), to: 0.3)
+
+        guard case .split(let s) = resized.root else {
+            Issue.record("unexpected node type")
+            return
+        }
+        #expect(abs(s.ratio - 0.7) < 0.001)
+    }
+
+    @Test func resizingFocusedPaneUsesNearestContainingSplit() throws {
+        let view1 = MockView()
+        let view2 = MockView()
+        let view3 = MockView()
+        var tree = SplitTree<MockView>(view: view1)
+        tree = try tree.inserting(view: view2, at: view1, direction: .right)
+        tree = try tree.inserting(view: view3, at: view2, direction: .down)
+
+        let resized = try tree.resizingFocusedPane(node: .leaf(view: view3), to: 0.25)
+
+        guard case .split(let rootSplit) = resized.root else {
+            Issue.record("unexpected root node type")
+            return
+        }
+        #expect(abs(rootSplit.ratio - 0.5) < 0.001)
+
+        guard case .split(let nestedSplit) = rootSplit.right else {
+            Issue.record("unexpected nested node type")
+            return
+        }
+        #expect(abs(nestedSplit.ratio - 0.75) < 0.001)
+    }
+
     // MARK: - Codable
 
     @Test func encodingAndDecodingPreservesTree() throws {

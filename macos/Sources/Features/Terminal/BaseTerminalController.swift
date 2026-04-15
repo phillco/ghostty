@@ -307,6 +307,23 @@ class BaseTerminalController: NSWindowController,
         }
     }
 
+    @discardableResult
+    func setSplitPercentage(containing target: Ghostty.SurfaceView, to percentage: Double) -> Bool {
+        guard percentage > 0, percentage < 100 else { return false }
+        guard let targetNode = surfaceTree.root?.node(view: target) else { return false }
+
+        do {
+            surfaceTree = try surfaceTree.resizingFocusedPane(
+                node: targetNode,
+                to: percentage / 100.0
+            )
+            return true
+        } catch {
+            Ghostty.logger.warning("failed to set split percentage: \(error)")
+            return false
+        }
+    }
+
     /// Called when the surfaceTree variable changed.
     ///
     /// Subclasses should call super first.

@@ -96,6 +96,9 @@
       <responds-to command="split">
         <cocoa method="handleSplitCommand:"/>
       </responds-to>
+      <responds-to command="set split percentage">
+        <cocoa method="handleSetSplitPercentageCommand:"/>
+      </responds-to>
       <responds-to command="promote to separate tab">
         <cocoa method="handlePromoteToSeparateTabCommand:"/>
       </responds-to>
@@ -222,6 +225,14 @@
         <cocoa key="configuration"/>
       </parameter>
       <result type="terminal" description="The newly created terminal."/>
+    </command>
+
+    <command name="set split percentage" code="GhstSSPc" description="Resize the nearest split around a terminal so that terminal occupies the given percentage.">
+      <direct-parameter type="specifier" description="The terminal whose containing split should be resized."/>
+      <parameter name="percentage" code="GSpP" type="real" description="Percentage of the containing split to assign to the terminal. The other side gets the remainder.">
+        <cocoa key="percentage"/>
+      </parameter>
+      <result type="boolean" description="True when the split was resized."/>
     </command>
 
     <command name="focus" code="GhstFcus" description="Focus a terminal, bringing its window to the front.">

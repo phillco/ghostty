@@ -133,6 +133,44 @@ final class ScriptTerminal: NSObject {
         return ScriptTerminal(surfaceView: newView)
     }
 
+    /// Handler for `set split percentage <terminal> percentage <n>`.
+    @objc(handleSetSplitPercentageCommand:)
+    func handleSetSplitPercentage(_ command: NSScriptCommand) -> NSNumber? {
+        guard NSApp.validateScript(command: command) else { return nil }
+
+        guard let surfaceView else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal surface is no longer available."
+            return nil
+        }
+
+        guard let percentage = command.evaluatedArguments?["percentage"] as? Double else {
+            command.scriptErrorNumber = errAEParamMissed
+            command.scriptErrorString = "Missing split percentage."
+            return nil
+        }
+
+        guard percentage > 0, percentage < 100 else {
+            command.scriptErrorNumber = errAECoercionFail
+            command.scriptErrorString = "Split percentage must be greater than 0 and less than 100."
+            return nil
+        }
+
+        guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal is not in a splittable window."
+            return nil
+        }
+
+        guard controller.setSplitPercentage(containing: surfaceView, to: percentage) else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal must be part of a split."
+            return nil
+        }
+
+        return NSNumber(value: true)
+    }
+
     /// Handler for `promote to separate tab <terminal>`.
     @objc(handlePromoteToSeparateTabCommand:)
     func handlePromoteToSeparateTab(_ command: NSScriptCommand) -> Any? {

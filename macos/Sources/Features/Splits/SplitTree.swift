@@ -332,6 +332,40 @@ extension SplitTree {
         return .init(root: newRoot, zoomed: nil)
     }
 
+    /// Resize the nearest split around a node so the target node gets the
+    /// requested proportion of that split.
+    ///
+    /// This will always reset the zoomed state.
+    func resizingFocusedPane(node: Node, to proportion: Double) throws -> Self {
+        guard let root else { throw SplitError.viewNotFound }
+
+        guard let path = root.path(to: node),
+              let targetSide = path.path.last else {
+            throw SplitError.viewNotFound
+        }
+
+        let splitPath = Path(path: Array(path.path.dropLast()))
+        guard let splitNode = root.node(at: splitPath),
+              case .split(let split) = splitNode else {
+            throw SplitError.viewNotFound
+        }
+
+        let newRatio = switch targetSide {
+        case .left: proportion
+        case .right: 1.0 - proportion
+        }
+
+        let newSplit = Node.Split(
+            direction: split.direction,
+            ratio: newRatio,
+            left: split.left,
+            right: split.right
+        )
+
+        let newRoot = try root.replacingNode(at: splitPath, with: .split(newSplit))
+        return .init(root: newRoot, zoomed: nil)
+    }
+
     /// Returns the total bounds of the split hierarchy using NSView bounds.
     /// Ignores x/y coordinates and assumes views are laid out in a perfect grid.
     /// Also ignores any possible padding between views.
