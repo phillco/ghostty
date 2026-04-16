@@ -337,6 +337,72 @@ extension SplitTree {
     ///
     /// This will always reset the zoomed state.
     func resizingFocusedPane(node: Node, to proportion: Double) throws -> Self {
+        try updatingContainingSplit(around: node) { split, targetSide in
+            let newRatio = switch targetSide {
+            case .left: proportion
+            case .right: 1.0 - proportion
+            }
+
+            return Node.Split(
+                direction: split.direction,
+                ratio: newRatio,
+                left: split.left,
+                right: split.right
+            )
+        }
+    }
+
+    /// Rotate the nearest split around a node between horizontal and vertical layout.
+    ///
+    /// This will always reset the zoomed state.
+    func rotatingFocusedPaneSplit(node: Node) throws -> Self {
+        try updatingContainingSplit(around: node) { split, _ in
+            let newDirection: Direction = switch split.direction {
+            case .horizontal: .vertical
+            case .vertical: .horizontal
+            }
+
+            return Node.Split(
+                direction: newDirection,
+                ratio: split.ratio,
+                left: split.left,
+                right: split.right
+            )
+        }
+    }
+
+    /// Set the nearest split around a node to a specific layout direction.
+    ///
+    /// This will always reset the zoomed state.
+    func settingFocusedPaneSplitDirection(node: Node, to direction: Direction) throws -> Self {
+        try updatingContainingSplit(around: node) { split, _ in
+            Node.Split(
+                direction: direction,
+                ratio: split.ratio,
+                left: split.left,
+                right: split.right
+            )
+        }
+    }
+
+    /// Reset the nearest split around a node to a 50/50 ratio.
+    ///
+    /// This will always reset the zoomed state.
+    func equalizingFocusedPaneSplit(node: Node) throws -> Self {
+        try updatingContainingSplit(around: node) { split, _ in
+            Node.Split(
+                direction: split.direction,
+                ratio: 0.5,
+                left: split.left,
+                right: split.right
+            )
+        }
+    }
+
+    private func updatingContainingSplit(
+        around node: Node,
+        _ update: (Node.Split, Path.Component) -> Node.Split
+    ) throws -> Self {
         guard let root else { throw SplitError.viewNotFound }
 
         guard let path = root.path(to: node),
@@ -350,18 +416,7 @@ extension SplitTree {
             throw SplitError.viewNotFound
         }
 
-        let newRatio = switch targetSide {
-        case .left: proportion
-        case .right: 1.0 - proportion
-        }
-
-        let newSplit = Node.Split(
-            direction: split.direction,
-            ratio: newRatio,
-            left: split.left,
-            right: split.right
-        )
-
+        let newSplit = update(split, targetSide)
         let newRoot = try root.replacingNode(at: splitPath, with: .split(newSplit))
         return .init(root: newRoot, zoomed: nil)
     }

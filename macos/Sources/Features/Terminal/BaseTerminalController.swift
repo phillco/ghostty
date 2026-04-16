@@ -324,6 +324,51 @@ class BaseTerminalController: NSWindowController,
         }
     }
 
+    @discardableResult
+    func rotateSplit(containing target: Ghostty.SurfaceView) -> Bool {
+        guard let targetNode = surfaceTree.root?.node(view: target) else { return false }
+
+        do {
+            surfaceTree = try surfaceTree.rotatingFocusedPaneSplit(node: targetNode)
+            return true
+        } catch {
+            Ghostty.logger.warning("failed to rotate split: \(error)")
+            return false
+        }
+    }
+
+    @discardableResult
+    func setSplitLayout(
+        containing target: Ghostty.SurfaceView,
+        to direction: SplitTree<Ghostty.SurfaceView>.Direction
+    ) -> Bool {
+        guard let targetNode = surfaceTree.root?.node(view: target) else { return false }
+
+        do {
+            surfaceTree = try surfaceTree.settingFocusedPaneSplitDirection(
+                node: targetNode,
+                to: direction
+            )
+            return true
+        } catch {
+            Ghostty.logger.warning("failed to set split layout: \(error)")
+            return false
+        }
+    }
+
+    @discardableResult
+    func equalizeSplit(containing target: Ghostty.SurfaceView) -> Bool {
+        guard let targetNode = surfaceTree.root?.node(view: target) else { return false }
+
+        do {
+            surfaceTree = try surfaceTree.equalizingFocusedPaneSplit(node: targetNode)
+            return true
+        } catch {
+            Ghostty.logger.warning("failed to equalize split: \(error)")
+            return false
+        }
+    }
+
     /// Called when the surfaceTree variable changed.
     ///
     /// Subclasses should call super first.

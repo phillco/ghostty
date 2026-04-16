@@ -99,6 +99,15 @@
       <responds-to command="set split percentage">
         <cocoa method="handleSetSplitPercentageCommand:"/>
       </responds-to>
+      <responds-to command="rotate split">
+        <cocoa method="handleRotateSplitCommand:"/>
+      </responds-to>
+      <responds-to command="set split layout">
+        <cocoa method="handleSetSplitLayoutCommand:"/>
+      </responds-to>
+      <responds-to command="equalize split">
+        <cocoa method="handleEqualizeSplitCommand:"/>
+      </responds-to>
       <responds-to command="promote to separate tab">
         <cocoa method="handlePromoteToSeparateTabCommand:"/>
       </responds-to>
@@ -140,6 +149,11 @@
       <enumerator name="left" code="GSlf" description="Split to the left."/>
       <enumerator name="down" code="GSdn" description="Split downward."/>
       <enumerator name="up" code="GSup" description="Split upward."/>
+    </enumeration>
+
+    <enumeration name="split layout" code="GSLt" description="Layout for an existing split.">
+      <enumerator name="columns" code="GCol" description="Lay split panes out side by side."/>
+      <enumerator name="rows" code="GRow" description="Lay split panes out top and bottom."/>
     </enumeration>
 
     <enumeration name="tab color" code="GTcE" description="A terminal tab color.">
@@ -233,6 +247,24 @@
         <cocoa key="percentage"/>
       </parameter>
       <result type="boolean" description="True when the split was resized."/>
+    </command>
+
+    <command name="rotate split" code="GhstRSpL" description="Rotate the nearest split around a terminal between columns and rows.">
+      <direct-parameter type="specifier" description="The terminal whose containing split should be rotated."/>
+      <result type="boolean" description="True when the split was rotated."/>
+    </command>
+
+    <command name="set split layout" code="GhstSSLo" description="Set the nearest split around a terminal to columns or rows.">
+      <direct-parameter type="specifier" description="The terminal whose containing split layout should be changed."/>
+      <parameter name="layout" code="GSLy" type="split layout" description="The layout to use for the containing split.">
+        <cocoa key="layout"/>
+      </parameter>
+      <result type="boolean" description="True when the split layout was changed."/>
+    </command>
+
+    <command name="equalize split" code="GhstESpL" description="Reset the nearest split around a terminal to an even 50/50 ratio.">
+      <direct-parameter type="specifier" description="The terminal whose containing split should be equalized."/>
+      <result type="boolean" description="True when the split was equalized."/>
     </command>
 
     <command name="focus" code="GhstFcus" description="Focus a terminal, bringing its window to the front.">

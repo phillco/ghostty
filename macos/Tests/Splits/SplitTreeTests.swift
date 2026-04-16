@@ -270,6 +270,56 @@ struct SplitTreeTests {
         #expect(abs(nestedSplit.ratio - 0.75) < 0.001)
     }
 
+    @Test func rotatingFocusedPaneSplitChangesNearestContainingSplitDirection() throws {
+        let view1 = MockView()
+        let view2 = MockView()
+        let view3 = MockView()
+        var tree = SplitTree<MockView>(view: view1)
+        tree = try tree.inserting(view: view2, at: view1, direction: .right)
+        tree = try tree.inserting(view: view3, at: view2, direction: .down)
+
+        let rotated = try tree.rotatingFocusedPaneSplit(node: .leaf(view: view3))
+
+        guard case .split(let rootSplit) = rotated.root else {
+            Issue.record("unexpected root node type")
+            return
+        }
+        #expect(rootSplit.direction == .horizontal)
+
+        guard case .split(let nestedSplit) = rootSplit.right else {
+            Issue.record("unexpected nested node type")
+            return
+        }
+        #expect(nestedSplit.direction == .horizontal)
+    }
+
+    @Test func settingFocusedPaneSplitDirectionChangesNearestContainingSplit() throws {
+        let (tree, view1, _) = try makeHorizontalSplit()
+
+        let changed = try tree.settingFocusedPaneSplitDirection(node: .leaf(view: view1), to: .vertical)
+
+        guard case .split(let s) = changed.root else {
+            Issue.record("unexpected node type")
+            return
+        }
+        #expect(s.direction == .vertical)
+        #expect(abs(s.ratio - 0.5) < 0.001)
+    }
+
+    @Test func equalizingFocusedPaneSplitResetsNearestContainingSplitRatio() throws {
+        let (tree, view1, _) = try makeHorizontalSplit()
+        let resized = try tree.resizingFocusedPane(node: .leaf(view: view1), to: 0.3)
+
+        let equalized = try resized.equalizingFocusedPaneSplit(node: .leaf(view: view1))
+
+        guard case .split(let s) = equalized.root else {
+            Issue.record("unexpected node type")
+            return
+        }
+        #expect(abs(s.ratio - 0.5) < 0.001)
+        #expect(s.direction == .horizontal)
+    }
+
     // MARK: - Codable
 
     @Test func encodingAndDecodingPreservesTree() throws {

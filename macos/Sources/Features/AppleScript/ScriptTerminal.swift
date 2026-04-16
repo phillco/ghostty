@@ -171,6 +171,91 @@ final class ScriptTerminal: NSObject {
         return NSNumber(value: true)
     }
 
+    /// Handler for `rotate split <terminal>`.
+    @objc(handleRotateSplitCommand:)
+    func handleRotateSplit(_ command: NSScriptCommand) -> NSNumber? {
+        guard NSApp.validateScript(command: command) else { return nil }
+
+        guard let surfaceView else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal surface is no longer available."
+            return nil
+        }
+
+        guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal is not in a splittable window."
+            return nil
+        }
+
+        guard controller.rotateSplit(containing: surfaceView) else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal must be part of a split."
+            return nil
+        }
+
+        return NSNumber(value: true)
+    }
+
+    /// Handler for `set split layout <terminal> layout <rows|columns>`.
+    @objc(handleSetSplitLayoutCommand:)
+    func handleSetSplitLayout(_ command: NSScriptCommand) -> NSNumber? {
+        guard NSApp.validateScript(command: command) else { return nil }
+
+        guard let surfaceView else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal surface is no longer available."
+            return nil
+        }
+
+        guard let layoutCode = command.evaluatedArguments?["layout"] as? UInt32,
+              let layout = ScriptSplitLayout(code: layoutCode) else {
+            command.scriptErrorNumber = errAEParamMissed
+            command.scriptErrorString = "Missing or unknown split layout."
+            return nil
+        }
+
+        guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal is not in a splittable window."
+            return nil
+        }
+
+        guard controller.setSplitLayout(containing: surfaceView, to: layout.splitDirection) else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal must be part of a split."
+            return nil
+        }
+
+        return NSNumber(value: true)
+    }
+
+    /// Handler for `equalize split <terminal>`.
+    @objc(handleEqualizeSplitCommand:)
+    func handleEqualizeSplit(_ command: NSScriptCommand) -> NSNumber? {
+        guard NSApp.validateScript(command: command) else { return nil }
+
+        guard let surfaceView else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal surface is no longer available."
+            return nil
+        }
+
+        guard let controller = surfaceView.window?.windowController as? BaseTerminalController else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal is not in a splittable window."
+            return nil
+        }
+
+        guard controller.equalizeSplit(containing: surfaceView) else {
+            command.scriptErrorNumber = errAEEventFailed
+            command.scriptErrorString = "Terminal must be part of a split."
+            return nil
+        }
+
+        return NSNumber(value: true)
+    }
+
     /// Handler for `promote to separate tab <terminal>`.
     @objc(handlePromoteToSeparateTabCommand:)
     func handlePromoteToSeparateTab(_ command: NSScriptCommand) -> Any? {
@@ -312,6 +397,28 @@ enum ScriptSplitDirection {
         case .left: .left
         case .down: .down
         case .up: .up
+        }
+    }
+}
+
+/// Converts four-character codes from the `split layout` enumeration in `Ghostty.sdef`
+/// to `SplitTree.Direction` values.
+enum ScriptSplitLayout {
+    case columns
+    case rows
+
+    init?(code: UInt32) {
+        switch code {
+        case "GCol".fourCharCode: self = .columns
+        case "GRow".fourCharCode: self = .rows
+        default: return nil
+        }
+    }
+
+    var splitDirection: SplitTree<Ghostty.SurfaceView>.Direction {
+        switch self {
+        case .columns: .horizontal
+        case .rows: .vertical
         }
     }
 }
