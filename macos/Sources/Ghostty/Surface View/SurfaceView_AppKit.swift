@@ -1581,6 +1581,11 @@ extension Ghostty {
             item.setImageIfDesired(systemSymbolName: "rectangle.bottomhalf.inset.filled")
             item = menu.addItem(withTitle: "Split Up", action: #selector(splitUp(_:)), keyEquivalent: "")
             item.setImageIfDesired(systemSymbolName: "rectangle.tophalf.inset.filled")
+            item = menu.addItem(
+                withTitle: rotateSplitContextMenuTitle,
+                action: #selector(rotateSplitFromContextMenu(_:)),
+                keyEquivalent: "")
+            item.setImageIfDesired(systemSymbolName: "arrow.trianglehead.2.clockwise.rotate.90")
             item = menu.addItem(withTitle: "Move Split to New Tab", action: #selector(moveSplitToNewTabFromContextMenu(_:)), keyEquivalent: "")
             item.setImageIfDesired(systemSymbolName: "uiwindow.split.2x1")
             item = menu.addItem(withTitle: "Move Split to New Window", action: #selector(moveSplitToNewWindowFromContextMenu(_:)), keyEquivalent: "")
@@ -1718,6 +1723,19 @@ extension Ghostty {
         @IBAction func splitUp(_ sender: Any) {
             guard let surface = self.surface else { return }
             ghostty_surface_split(surface, GHOSTTY_SPLIT_DIRECTION_UP)
+        }
+
+        private var rotateSplitContextMenuTitle: String {
+            guard let controller = window?.windowController as? BaseTerminalController else {
+                return "Switch Split Orientation"
+            }
+
+            return controller.rotateSplitMenuTitle(containing: self)
+        }
+
+        @IBAction func rotateSplitFromContextMenu(_ sender: Any?) {
+            guard let controller = window?.windowController as? BaseTerminalController else { return }
+            _ = controller.rotateSplit(containing: self)
         }
 
         @IBAction func moveSplitToNewTabFromContextMenu(_ sender: Any?) {
@@ -2205,6 +2223,10 @@ extension Ghostty.SurfaceView: NSMenuItemValidation {
         case #selector(toggleReadonly):
             item.state = readonly ? .on : .off
             return true
+
+        case #selector(rotateSplitFromContextMenu):
+            guard let controller = window?.windowController as? BaseTerminalController else { return false }
+            return controller.canRotateSplit(containing: self)
 
         case #selector(moveSplitToNewWindowFromContextMenu):
             if let controller = window?.windowController as? TerminalController {

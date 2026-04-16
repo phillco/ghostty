@@ -1593,6 +1593,23 @@ extension BaseTerminalController: NSMenuItemValidation {
 // MARK: Combine Methods
 
 extension BaseTerminalController {
+    func canRotateSplit(containing target: Ghostty.SurfaceView) -> Bool {
+        guard surfaceTree.isSplit else { return false }
+        return surfaceTree.contains(target)
+    }
+
+    func rotateSplitMenuTitle(containing target: Ghostty.SurfaceView) -> String {
+        guard let targetNode = surfaceTree.root?.node(view: target),
+              let direction = try? surfaceTree.focusedPaneSplitDirection(node: targetNode) else {
+            return "Switch Split Orientation"
+        }
+
+        return switch direction {
+        case .horizontal: "Switch Split to Rows"
+        case .vertical: "Switch Split to Columns"
+        }
+    }
+
     func canMoveSplitToNewWindow(_ target: Ghostty.SurfaceView) -> Bool {
         guard surfaceTree.isSplit else { return false }
         return surfaceTree.contains(target)

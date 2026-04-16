@@ -293,6 +293,19 @@ struct SplitTreeTests {
         #expect(nestedSplit.direction == .horizontal)
     }
 
+    @Test func focusedPaneSplitDirectionReturnsNearestContainingSplitDirection() throws {
+        let view1 = MockView()
+        let view2 = MockView()
+        let view3 = MockView()
+        var tree = SplitTree<MockView>(view: view1)
+        tree = try tree.inserting(view: view2, at: view1, direction: .right)
+        tree = try tree.inserting(view: view3, at: view2, direction: .down)
+
+        let direction = try tree.focusedPaneSplitDirection(node: .leaf(view: view3))
+
+        #expect(direction == .vertical)
+    }
+
     @Test func settingFocusedPaneSplitDirectionChangesNearestContainingSplit() throws {
         let (tree, view1, _) = try makeHorizontalSplit()
 

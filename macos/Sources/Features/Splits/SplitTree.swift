@@ -371,6 +371,11 @@ extension SplitTree {
         }
     }
 
+    /// Return the direction of the nearest split around a node.
+    func focusedPaneSplitDirection(node: Node) throws -> Direction {
+        try containingSplit(around: node).split.direction
+    }
+
     /// Set the nearest split around a node to a specific layout direction.
     ///
     /// This will always reset the zoomed state.
@@ -403,6 +408,15 @@ extension SplitTree {
         around node: Node,
         _ update: (Node.Split, Path.Component) -> Node.Split
     ) throws -> Self {
+        let containing = try containingSplit(around: node)
+        let newSplit = update(containing.split, containing.targetSide)
+        let newRoot = try containing.root.replacingNode(at: containing.splitPath, with: .split(newSplit))
+        return .init(root: newRoot, zoomed: nil)
+    }
+
+    private func containingSplit(
+        around node: Node
+    ) throws -> (root: Node, splitPath: Path, split: Node.Split, targetSide: Path.Component) {
         guard let root else { throw SplitError.viewNotFound }
 
         guard let path = root.path(to: node),
@@ -416,9 +430,7 @@ extension SplitTree {
             throw SplitError.viewNotFound
         }
 
-        let newSplit = update(split, targetSide)
-        let newRoot = try root.replacingNode(at: splitPath, with: .split(newSplit))
-        return .init(root: newRoot, zoomed: nil)
+        return (root, splitPath, split, targetSide)
     }
 
     /// Returns the total bounds of the split hierarchy using NSView bounds.
