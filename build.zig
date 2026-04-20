@@ -190,11 +190,11 @@ pub fn build(b: *std.Build) !void {
         if (!config.target.result.os.tag.isDarwin()) {
             lib_shared.installHeader(); // Only need one header
             if (config.target.result.os.tag == .windows) {
-                lib_shared.install("ghostty.dll");
-                lib_static.install("ghostty-static.lib");
+                lib_shared.install("ghostty-internal.dll");
+                lib_static.install("ghostty-internal-static.lib");
             } else {
-                lib_shared.install("libghostty.so");
-                lib_static.install("libghostty.a");
+                lib_shared.install("ghostty-internal.so");
+                lib_static.install("ghostty-internal.a");
             }
         }
     }
@@ -329,8 +329,8 @@ pub fn build(b: *std.Build) !void {
         test_lib_vt_step.dependOn(&mod_vt_c_test_run.step);
     }
 
-    // Tests
-    {
+    // Tests (skip when building libghostty-vt)
+    if (!config.emit_lib_vt) {
         // Full unit tests
         const test_exe = b.addTest(.{
             .name = "ghostty-test",

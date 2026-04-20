@@ -20,6 +20,7 @@
 # "!denounce" or "!denounce [username]" on a discussion.
 00-kat
 04cb
+0xdvc
 aalhendi
 abdurrahmanski
 abudvytis
@@ -44,6 +45,7 @@ bernsno
 beryesa
 bitigchi
 bkircher
+bleikurr
 bo2themax
 brentschroeter
 brianc442
@@ -81,6 +83,7 @@ eriksremess
 faukah
 filip7
 flou
+fornwall
 francescarpi
 fru1tworld
 gagbo
@@ -100,6 +103,7 @@ hqnna
 hulet
 i999rri
 icodesign
+illiakrauchanka
 j0hnm4r5
 jacobsandlund
 jake-stewart
