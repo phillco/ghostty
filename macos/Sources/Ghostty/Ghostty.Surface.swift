@@ -154,5 +154,56 @@ extension Ghostty {
                 ghostty_surface_binding_action(surface, cString, UInt(len - 1))
             }
         }
+
+        /// Set a per-session terminal variable.
+        @MainActor
+        func setSessionVariable(name: String, value: String) -> Bool {
+            let nameLen = name.utf8CString.count
+            let valueLen = value.utf8CString.count
+            if nameLen <= 1 { return false }
+
+            return name.withCString { namePtr in
+                value.withCString { valuePtr in
+                    ghostty_surface_session_variable_set(
+                        surface,
+                        namePtr,
+                        UInt(nameLen - 1),
+                        valuePtr,
+                        UInt(valueLen - 1))
+                }
+            }
+        }
+
+        /// Get a per-session terminal variable.
+        @MainActor
+        func sessionVariable(name: String) -> String? {
+            let nameLen = name.utf8CString.count
+            if nameLen <= 1 { return nil }
+
+            var result = ghostty_string_s()
+            let ok = name.withCString { namePtr in
+                ghostty_surface_session_variable_get(surface, namePtr, UInt(nameLen - 1), &result)
+            }
+            guard ok else { return nil }
+            return AllocatedString(result).string
+        }
+
+        /// Get all per-session terminal variables.
+        @MainActor
+        var sessionVariables: [String: String] {
+            let count = Int(ghostty_surface_session_variable_count(surface))
+            if count == 0 { return [:] }
+
+            var result: [String: String] = [:]
+            for index in 0..<count {
+                var key = ghostty_string_s()
+                var value = ghostty_string_s()
+                guard ghostty_surface_session_variable_at(surface, UInt(index), &key, &value) else { continue }
+                let swiftKey = AllocatedString(key).string
+                let swiftValue = AllocatedString(value).string
+                result[swiftKey] = swiftValue
+            }
+            return result
+        }
     }
 }

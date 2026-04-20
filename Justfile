@@ -23,20 +23,20 @@ build *args:
 
 install:
     if [ "$(uname -s)" = "Darwin" ]; then \
-        just macos-build; \
-        if [ -d "macos/build/Debug/Ghostty.app" ]; then \
-            app="macos/build/Debug/Ghostty.app"; \
-        elif [ -d "macos/macos/build/Debug/Ghostty.app" ]; then \
-            app="macos/macos/build/Debug/Ghostty.app"; \
+        just macos-build Release; \
+        if [ -d "macos/build/Release/Ghostty.app" ]; then \
+            app="macos/build/Release/Ghostty.app"; \
+        elif [ -d "macos/macos/build/Release/Ghostty.app" ]; then \
+            app="macos/macos/build/Release/Ghostty.app"; \
         else \
-            echo "Ghostty.app not found for Debug build" >&2; \
+            echo "Ghostty.app not found for Release build" >&2; \
             exit 1; \
         fi; \
         mkdir -p "$(dirname '{{install_app}}')"; \
         rm -rf "{{install_app}}"; \
         ditto "$app" "{{install_app}}"; \
     else \
-        just build-zig; \
+        just build-release; \
         mkdir -p "$(dirname '{{install_app}}')"; \
         rm -rf "{{install_app}}"; \
         ditto "{{app_bundle}}" "{{install_app}}"; \
@@ -48,6 +48,9 @@ run-zig *args:
 
 build-zig *args:
     zig build {{args}}
+
+build-release *args:
+    zig build --release=fast {{args}}
 
 build-core *args:
     zig build -Demit-macos-app=false {{args}}

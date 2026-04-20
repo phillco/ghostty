@@ -68,6 +68,9 @@ pwd: std.ArrayList(u8),
 /// The title of the terminal as set by escape sequences (e.g. OSC 0/2).
 title: std.ArrayList(u8),
 
+/// Per-session key-value data set by escape sequences or host APIs.
+session_variables: std.StringHashMapUnmanaged([]u8),
+
 /// The color state for this terminal.
 colors: Colors,
 
@@ -243,6 +246,7 @@ pub fn init(
         },
         .pwd = .empty,
         .title = .empty,
+        .session_variables = .empty,
         .colors = opts.colors,
         .modes = .{
             .values = opts.default_modes,
@@ -256,6 +260,7 @@ pub fn deinit(self: *Terminal, alloc: Allocator) void {
     self.screens.deinit(alloc);
     self.pwd.deinit(alloc);
     self.title.deinit(alloc);
+    self.deinitSessionVariables(alloc);
     self.* = undefined;
 }
 
@@ -2937,6 +2942,59 @@ pub fn getPwd(self: *const Terminal) ?[:0]const u8 {
     return self.pwd.items[0 .. self.pwd.items.len - 1 :0];
 }
 
+/// Set a per-session variable for this terminal.
+pub fn setSessionVariable(
+    self: *Terminal,
+    key: []const u8,
+    value: []const u8,
+) !void {
+    if (key.len == 0) return;
+
+    const alloc = self.gpa();
+    if (self.session_variables.getPtr(key)) |old_value| {
+        const value_copy = try alloc.dupe(u8, value);
+        alloc.free(old_value.*);
+        old_value.* = value_copy;
+        return;
+    }
+
+    const key_copy = try alloc.dupe(u8, key);
+    errdefer alloc.free(key_copy);
+    const value_copy = try alloc.dupe(u8, value);
+    errdefer alloc.free(value_copy);
+    try self.session_variables.putNoClobber(alloc, key_copy, value_copy);
+}
+
+/// Set a per-session variable from iTerm2 OSC 1337 SetUserVar.
+pub fn setIterm2UserVariable(
+    self: *Terminal,
+    key: []const u8,
+    value: []const u8,
+) !void {
+    if (std.mem.startsWith(u8, key, "user.")) {
+        return try self.setSessionVariable(key, value);
+    }
+
+    const alloc = self.gpa();
+    const normalized = try std.fmt.allocPrint(alloc, "user.{s}", .{key});
+    defer alloc.free(normalized);
+    try self.setSessionVariable(normalized, value);
+}
+
+/// Get a per-session variable for this terminal.
+pub fn getSessionVariable(self: *const Terminal, key: []const u8) ?[]const u8 {
+    return self.session_variables.get(key);
+}
+
+fn deinitSessionVariables(self: *Terminal, alloc: Allocator) void {
+    var it = self.session_variables.iterator();
+    while (it.next()) |entry| {
+        alloc.free(entry.key_ptr.*);
+        alloc.free(entry.value_ptr.*);
+    }
+    self.session_variables.deinit(alloc);
+}
+
 /// Set the title for the terminal, as set by escape sequences (e.g. OSC 0/2).
 pub fn setTitle(self: *Terminal, t: []const u8) !void {
     self.title.clearRetainingCapacity();
@@ -2951,6 +3009,30 @@ pub fn setTitle(self: *Terminal, t: []const u8) !void {
 pub fn getTitle(self: *const Terminal) ?[:0]const u8 {
     if (self.title.items.len == 0) return null;
     return self.title.items[0 .. self.title.items.len - 1 :0];
+}
+
+test "set and get session variables" {
+    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    defer t.deinit(testing.allocator);
+
+    try t.setSessionVariable("user.codexSessionId", "abc123");
+    try testing.expectEqualStrings("abc123", t.getSessionVariable("user.codexSessionId").?);
+    try testing.expect(t.getSessionVariable("user.missing") == null);
+
+    try t.setSessionVariable("user.codexSessionId", "def456");
+    try testing.expectEqualStrings("def456", t.getSessionVariable("user.codexSessionId").?);
+}
+
+test "iTerm2 user variables are stored under user namespace" {
+    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    defer t.deinit(testing.allocator);
+
+    try t.setIterm2UserVariable("codexSessionId", "abc123");
+    try testing.expect(t.getSessionVariable("codexSessionId") == null);
+    try testing.expectEqualStrings("abc123", t.getSessionVariable("user.codexSessionId").?);
+
+    try t.setIterm2UserVariable("user.alreadyQualified", "def456");
+    try testing.expectEqualStrings("def456", t.getSessionVariable("user.alreadyQualified").?);
 }
 
 /// Switch to the given screen type (alternate or primary).

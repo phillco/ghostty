@@ -2310,6 +2310,12 @@ extension Ghostty.SurfaceView {
     private static let accessibilityCursorPositionAttribute = NSAccessibility.Attribute(
         rawValue: "AXGhosttyCursorPosition"
     )
+    private static let accessibilitySessionVariablesAttribute = NSAccessibility.Attribute(
+        rawValue: "AXGhosttySessionVariables"
+    )
+    private static let accessibilityCodexSessionIDAttribute = NSAccessibility.Attribute(
+        rawValue: "AXGhosttyCodexSessionID"
+    )
 
     /// Indicates that this view should be exposed to accessibility tools like VoiceOver.
     /// By returning true, we make the terminal surface accessible to screen readers
@@ -2539,6 +2545,8 @@ extension Ghostty.SurfaceView {
     override func accessibilityAttributeNames() -> [NSAccessibility.Attribute] {
         var attrs = super.accessibilityAttributeNames()
         attrs.append(Self.accessibilityCursorPositionAttribute)
+        attrs.append(Self.accessibilitySessionVariablesAttribute)
+        attrs.append(Self.accessibilityCodexSessionIDAttribute)
         return attrs
     }
 
@@ -2600,12 +2608,24 @@ extension Ghostty.SurfaceView {
             ]
         }
 
+        if attribute == Self.accessibilitySessionVariablesAttribute {
+            guard let surface = surfaceModel else { return nil }
+            return surface.sessionVariables
+        }
+
+        if attribute == Self.accessibilityCodexSessionIDAttribute {
+            guard let surface = surfaceModel else { return nil }
+            return surface.sessionVariable(name: "user.codexSessionId")
+        }
+
         return super.accessibilityAttributeValue(attribute)
     }
 
     override func accessibilityIsAttributeSettable(_ attribute: NSAccessibility.Attribute) -> Bool {
         if attribute == .selectedTextRange || attribute == .selectedText { return true }
         if attribute == Self.accessibilityCursorPositionAttribute { return false }
+        if attribute == Self.accessibilitySessionVariablesAttribute { return false }
+        if attribute == Self.accessibilityCodexSessionIDAttribute { return false }
         return super.accessibilityIsAttributeSettable(attribute)
     }
 

@@ -330,6 +330,8 @@ pub const StreamHandler = struct {
             .progress_report => self.progressReport(value),
             .start_hyperlink => try self.startHyperlink(value.uri, value.id),
             .clipboard_contents => try self.clipboardContents(value.kind, value.data),
+            .iterm2_set_user_var => try self.setSessionVariable(value.key, value.value),
+            .iterm2_report_variable => try self.reportSessionVariable(value.name, value.terminator),
             .semantic_prompt => try self.semanticPrompt(value),
             .mouse_shape => try self.setMouseShape(value),
             .configure_charset => self.configureCharset(value.slot, value.charset),
@@ -1069,6 +1071,59 @@ pub const StreamHandler = struct {
                 .clipboard_type = clipboard_type,
             },
         });
+    }
+
+    fn setSessionVariable(self: *StreamHandler, key: []const u8, encoded_value: []const u8) !void {
+        const decoder = std.base64.standard.Decoder;
+        const size = decoder.calcSizeForSlice(encoded_value) catch |err| {
+            log.info("invalid iTerm2 SetUserVar base64 for key={s} err={}", .{ key, err });
+            return;
+        };
+
+        const buf = try self.alloc.alloc(u8, size);
+        defer self.alloc.free(buf);
+
+        decoder.decode(buf, encoded_value) catch |err| {
+            log.info("invalid iTerm2 SetUserVar base64 for key={s} err={}", .{ key, err });
+            return;
+        };
+
+        try self.terminal.setIterm2UserVariable(key, buf);
+    }
+
+    fn reportSessionVariable(
+        self: *StreamHandler,
+        encoded_name: []const u8,
+        terminator: terminal.osc.Terminator,
+    ) !void {
+        const decoder = std.base64.standard.Decoder;
+        const name_size = decoder.calcSizeForSlice(encoded_name) catch |err| {
+            log.info("invalid iTerm2 ReportVariable name base64 err={}", .{err});
+            return;
+        };
+
+        const name_buf = try self.alloc.alloc(u8, name_size);
+        defer self.alloc.free(name_buf);
+
+        decoder.decode(name_buf, encoded_name) catch |err| {
+            log.info("invalid iTerm2 ReportVariable name base64 err={}", .{err});
+            return;
+        };
+
+        const value = self.terminal.getSessionVariable(name_buf) orelse "";
+        const encoder = std.base64.standard.Encoder;
+        const encoded_value_size = encoder.calcSize(value.len);
+        const prefix = "\x1b]1337;ReportVariable=";
+        const suffix = terminator.string();
+        const response = try self.alloc.alloc(u8, prefix.len + encoded_value_size + suffix.len);
+        defer self.alloc.free(response);
+
+        @memcpy(response[0..prefix.len], prefix);
+        const encoded_value = encoder.encode(response[prefix.len .. prefix.len + encoded_value_size], value);
+        assert(encoded_value.len == encoded_value_size);
+        @memcpy(response[prefix.len + encoded_value_size ..], suffix);
+
+        self.messageWriter(try termio.Message.writeReq(self.alloc, response));
     }
 
     fn semanticPrompt(

@@ -119,6 +119,8 @@ pub const Action = union(Key) {
     progress_report: osc.Command.ProgressReport,
     start_hyperlink: StartHyperlink,
     clipboard_contents: ClipboardContents,
+    iterm2_set_user_var: Iterm2SetUserVar,
+    iterm2_report_variable: Iterm2ReportVariable,
     mouse_shape: MouseShape,
     configure_charset: ConfigureCharset,
     set_attribute: sgr.Attribute,
@@ -216,6 +218,8 @@ pub const Action = union(Key) {
             "progress_report",
             "start_hyperlink",
             "clipboard_contents",
+            "iterm2_set_user_var",
+            "iterm2_report_variable",
             "mouse_shape",
             "configure_charset",
             "set_attribute",
@@ -378,6 +382,40 @@ pub const Action = union(Key) {
             return .{
                 .kind = self.kind,
                 .data = .init(self.data),
+            };
+        }
+    };
+
+    pub const Iterm2SetUserVar = struct {
+        key: []const u8,
+        value: []const u8,
+
+        pub const C = extern struct {
+            key: lib.String,
+            value: lib.String,
+        };
+
+        pub fn cval(self: Iterm2SetUserVar) Iterm2SetUserVar.C {
+            return .{
+                .key = .init(self.key),
+                .value = .init(self.value),
+            };
+        }
+    };
+
+    pub const Iterm2ReportVariable = struct {
+        name: []const u8,
+        terminator: osc.Terminator,
+
+        pub const C = extern struct {
+            name: lib.String,
+            terminator: osc.Terminator.C,
+        };
+
+        pub fn cval(self: Iterm2ReportVariable) Iterm2ReportVariable.C {
+            return .{
+                .name = .init(self.name),
+                .terminator = self.terminator.cval(),
             };
         }
     };
@@ -1992,6 +2030,20 @@ pub fn Stream(comptime H: type) type {
                     self.handler.vt(.clipboard_contents, .{
                         .kind = clip.kind,
                         .data = clip.data,
+                    });
+                },
+
+                .iterm2_set_user_var => |v| {
+                    self.handler.vt(.iterm2_set_user_var, .{
+                        .key = v.key,
+                        .value = v.value,
+                    });
+                },
+
+                .iterm2_report_variable => |v| {
+                    self.handler.vt(.iterm2_report_variable, .{
+                        .name = v.name,
+                        .terminator = v.terminator,
                     });
                 },
 

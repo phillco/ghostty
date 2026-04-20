@@ -90,6 +90,9 @@
         <cocoa key="title"/>
       </property>
       <property name="working directory" code="Gwdr" type="text" access="r" description="Current working directory for the terminal process."/>
+      <property name="variables" code="GSVs" type="record" access="r" description="Per-session terminal variables exposed by escape sequences and automation.">
+        <cocoa key="sessionVariables"/>
+      </property>
       <property name="tab color" code="GTcL" type="tab color" access="rw" description="Current tab color for the containing terminal window.">
         <cocoa key="tabColor"/>
       </property>
@@ -190,7 +193,7 @@
       <enumerator name="stationary" code="SMst" description="Stationary."/>
     </enumeration>
 
-    <command name="perform action" code="GhstPfAc" description="Perform a Ghostty action string on a terminal.">
+    <command name="perform action" code="GhstPfAc" description="Perform a Ghostty action string on a terminal. Use set_session_variable:NAME=VALUE to set a session variable.">
       <direct-parameter type="text" description="The Ghostty action string."/>
       <parameter name="on" code="GonT" type="terminal" description="Target terminal."/>
       <result type="boolean" description="True when the action was performed."/>

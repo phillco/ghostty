@@ -11,6 +11,7 @@ import AppKit
 /// - `property id` -> `@objc(id)` getter below.
 /// - `property title` -> `@objc(title)` getter below.
 /// - `property working directory` -> `@objc(workingDirectory)` getter below.
+/// - `property variables` -> `@objc(sessionVariables)` getter below.
 ///
 /// We keep only a weak reference to the underlying `SurfaceView` so this
 /// wrapper never extends the terminal's lifetime.
@@ -53,6 +54,26 @@ final class ScriptTerminal: NSObject {
         return surfaceView?.pwd ?? ""
     }
 
+    /// Exposed as the AppleScript `variables` property.
+    @objc(sessionVariables)
+    var sessionVariables: NSDictionary {
+        guard NSApp.isAppleScriptEnabled else { return [:] }
+        guard let surface = surfaceView?.surfaceModel else { return [:] }
+        return surface.sessionVariables as NSDictionary
+    }
+
+    func sessionVariable(name: String) -> String? {
+        guard NSApp.isAppleScriptEnabled else { return nil }
+        guard let surface = surfaceView?.surfaceModel else { return nil }
+        return surface.sessionVariable(name: name)
+    }
+
+    func setSessionVariable(name: String, value: String) -> Bool {
+        guard NSApp.isAppleScriptEnabled else { return false }
+        guard let surface = surfaceView?.surfaceModel else { return false }
+        return surface.setSessionVariable(name: name, value: value)
+    }
+
     /// Exposed as the AppleScript `tab color` property.
     @objc(tabColor)
     var tabColor: FourCharCode {
@@ -74,8 +95,22 @@ final class ScriptTerminal: NSObject {
     /// Used by command handling (`perform action ... on <terminal>`).
     func perform(action: String) -> Bool {
         guard NSApp.isAppleScriptEnabled else { return false }
+        if performSessionVariableAction(action) { return true }
         guard let surfaceModel = surfaceView?.surfaceModel else { return false }
         return surfaceModel.perform(action: action)
+    }
+
+    private func performSessionVariableAction(_ action: String) -> Bool {
+        let prefix = "set_session_variable:"
+        guard action.hasPrefix(prefix) else { return false }
+        let payload = action.dropFirst(prefix.count)
+        guard let separator = payload.firstIndex(of: "=") else { return false }
+
+        let name = String(payload[..<separator])
+        guard !name.isEmpty else { return false }
+        let valueStart = payload.index(after: separator)
+        let value = String(payload[valueStart...])
+        return setSessionVariable(name: name, value: value)
     }
 
     /// Handler for `split <terminal> direction <dir>`.

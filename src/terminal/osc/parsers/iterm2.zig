@@ -63,7 +63,7 @@ const map: Map = .initComptime(
 
 /// Parse OSC 1337
 /// https://iterm2.com/documentation-escape-codes.html
-pub fn parse(parser: *Parser, _: ?u8) ?*Command {
+pub fn parse(parser: *Parser, terminator_ch: ?u8) ?*Command {
     assert(parser.state == .@"1337");
 
     const cap = if (parser.capture) |*c| c else {
@@ -154,6 +154,49 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
             return &parser.command;
         },
 
+        .SetUserVar => {
+            const value = value_ orelse {
+                parser.command = .invalid;
+                return null;
+            };
+            const index = std.mem.indexOfScalar(u8, value, '=') orelse {
+                parser.command = .invalid;
+                return null;
+            };
+            if (index == 0) {
+                parser.command = .invalid;
+                return null;
+            }
+
+            value[index] = 0;
+            parser.command = .{
+                .iterm2_set_user_var = .{
+                    .key = value[0..index :0],
+                    .value = value[index + 1 .. value.len :0],
+                },
+            };
+            return &parser.command;
+        },
+
+        .ReportVariable => {
+            const value = value_ orelse {
+                parser.command = .invalid;
+                return null;
+            };
+            if (value.len == 0) {
+                parser.command = .invalid;
+                return null;
+            }
+
+            parser.command = .{
+                .iterm2_report_variable = .{
+                    .name = value,
+                    .terminator = .init(terminator_ch),
+                },
+            };
+            return &parser.command;
+        },
+
         .AddAnnotation,
         .AddHiddenAnnotation,
         .Block,
@@ -175,7 +218,6 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
         .PushKeyLabels,
         .RemoteHost,
         .ReportCellSize,
-        .ReportVariable,
         .RequestAttention,
         .RequestUpload,
         .SetBackgroundImageFile,
@@ -184,7 +226,6 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
         .SetKeyLabel,
         .SetMark,
         .SetProfile,
-        .SetUserVar,
         .ShellIntegrationVersion,
         .StealFocus,
         .UnicodeVersion,
@@ -394,6 +435,51 @@ test "OSC: 1337: test Copy with non-empty value that is valid base64" {
     try testing.expect(cmd == .clipboard_contents);
     try testing.expectEqual('c', cmd.clipboard_contents.kind);
     try testing.expectEqualStrings("YWJjMTIz", cmd.clipboard_contents.data);
+}
+
+test "OSC: 1337: test SetUserVar with base64 padding" {
+    const testing = std.testing;
+
+    var p: Parser = .init(testing.allocator);
+    defer p.deinit();
+
+    const input = "1337;SetUserVar=user.codexSessionId=YWJjZA==";
+    for (input) |ch| p.next(ch);
+
+    const cmd = p.end('\x1b').?.*;
+    try testing.expect(cmd == .iterm2_set_user_var);
+    try testing.expectEqualStrings("user.codexSessionId", cmd.iterm2_set_user_var.key);
+    try testing.expectEqualStrings("YWJjZA==", cmd.iterm2_set_user_var.value);
+}
+
+test "OSC: 1337: test SetUserVar with missing value separator" {
+    const testing = std.testing;
+
+    var p: Parser = .init(testing.allocator);
+    defer p.deinit();
+
+    const input = "1337;SetUserVar=user.codexSessionId";
+    for (input) |ch| p.next(ch);
+
+    try testing.expect(p.end('\x1b') == null);
+}
+
+test "OSC: 1337: test ReportVariable" {
+    const testing = std.testing;
+
+    var p: Parser = .init(testing.allocator);
+    defer p.deinit();
+
+    const input = "1337;ReportVariable=dXNlci5jb2RleFNlc3Npb25JZA==";
+    for (input) |ch| p.next(ch);
+
+    const cmd = p.end('\x1b').?.*;
+    try testing.expect(cmd == .iterm2_report_variable);
+    try testing.expectEqualStrings(
+        "dXNlci5jb2RleFNlc3Npb25JZA==",
+        cmd.iterm2_report_variable.name,
+    );
+    try testing.expectEqual(.st, cmd.iterm2_report_variable.terminator);
 }
 
 test "OSC: 1337: test CurrentDir with no value" {

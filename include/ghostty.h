@@ -1176,6 +1176,20 @@ GHOSTTY_API bool ghostty_surface_read_text(ghostty_surface_t,
 GHOSTTY_API void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
 GHOSTTY_API bool ghostty_surface_cursor_position(ghostty_surface_t,
                                                     ghostty_cursor_position_s*);
+GHOSTTY_API bool ghostty_surface_session_variable_set(ghostty_surface_t,
+                                                         const char*,
+                                                         uintptr_t,
+                                                         const char*,
+                                                         uintptr_t);
+GHOSTTY_API bool ghostty_surface_session_variable_get(ghostty_surface_t,
+                                                         const char*,
+                                                         uintptr_t,
+                                                         ghostty_string_s*);
+GHOSTTY_API uintptr_t ghostty_surface_session_variable_count(ghostty_surface_t);
+GHOSTTY_API bool ghostty_surface_session_variable_at(ghostty_surface_t,
+                                                        uintptr_t,
+                                                        ghostty_string_s*,
+                                                        ghostty_string_s*);
 
 #ifdef __APPLE__
 GHOSTTY_API void ghostty_surface_set_display_id(ghostty_surface_t, uint32_t);

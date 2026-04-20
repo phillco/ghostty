@@ -1303,6 +1303,23 @@ pub const CAPI = struct {
         }
     };
 
+    // ghostty_string_s
+    const String = extern struct {
+        ptr: ?[*]const u8,
+        len: usize,
+        sentinel: bool,
+
+        pub fn deinit(self: *String) void {
+            const ptr = self.ptr orelse return;
+            if (self.sentinel) {
+                global.alloc.free(ptr[0..self.len :0]);
+            } else {
+                global.alloc.free(ptr[0..self.len]);
+            }
+            self.* = .{ .ptr = null, .len = 0, .sentinel = false };
+        }
+    };
+
     // ghostty_selection_range_s
     const SelectionRange = extern struct {
         location: u32,
@@ -1691,6 +1708,97 @@ pub const CAPI = struct {
             };
         }
         return true;
+    }
+
+    fn allocString(slice: []const u8) !String {
+        const copy = try global.alloc.dupe(u8, slice);
+        return .{
+            .ptr = copy.ptr,
+            .len = copy.len,
+            .sentinel = false,
+        };
+    }
+
+    /// Set a per-session terminal variable.
+    export fn ghostty_surface_session_variable_set(
+        surface: *Surface,
+        key_ptr: [*]const u8,
+        key_len: usize,
+        value_ptr: [*]const u8,
+        value_len: usize,
+    ) bool {
+        if (key_len == 0) return false;
+
+        const core_surface = &surface.core_surface;
+        core_surface.renderer_state.mutex.lock();
+        defer core_surface.renderer_state.mutex.unlock();
+
+        core_surface.io.terminal.setSessionVariable(
+            key_ptr[0..key_len],
+            value_ptr[0..value_len],
+        ) catch |err| {
+            log.warn("error setting session variable err={}", .{err});
+            return false;
+        };
+        return true;
+    }
+
+    /// Get a per-session terminal variable.
+    export fn ghostty_surface_session_variable_get(
+        surface: *Surface,
+        key_ptr: [*]const u8,
+        key_len: usize,
+        result: *String,
+    ) bool {
+        const core_surface = &surface.core_surface;
+        core_surface.renderer_state.mutex.lock();
+        defer core_surface.renderer_state.mutex.unlock();
+
+        const value = core_surface.io.terminal.getSessionVariable(key_ptr[0..key_len]) orelse return false;
+        result.* = allocString(value) catch |err| {
+            log.warn("error copying session variable err={}", .{err});
+            return false;
+        };
+        return true;
+    }
+
+    /// Return the number of per-session terminal variables.
+    export fn ghostty_surface_session_variable_count(surface: *Surface) usize {
+        const core_surface = &surface.core_surface;
+        core_surface.renderer_state.mutex.lock();
+        defer core_surface.renderer_state.mutex.unlock();
+        return core_surface.io.terminal.session_variables.count();
+    }
+
+    /// Get a per-session variable by index.
+    export fn ghostty_surface_session_variable_at(
+        surface: *Surface,
+        index: usize,
+        key_result: *String,
+        value_result: *String,
+    ) bool {
+        const core_surface = &surface.core_surface;
+        core_surface.renderer_state.mutex.lock();
+        defer core_surface.renderer_state.mutex.unlock();
+
+        var it = core_surface.io.terminal.session_variables.iterator();
+        var i: usize = 0;
+        while (it.next()) |entry| : (i += 1) {
+            if (i != index) continue;
+
+            key_result.* = allocString(entry.key_ptr.*) catch |err| {
+                log.warn("error copying session variable key err={}", .{err});
+                return false;
+            };
+            value_result.* = allocString(entry.value_ptr.*) catch |err| {
+                key_result.deinit();
+                log.warn("error copying session variable value err={}", .{err});
+                return false;
+            };
+            return true;
+        }
+
+        return false;
     }
 
     /// Read some arbitrary text from the surface.

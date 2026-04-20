@@ -9,6 +9,7 @@ const stream = @import("stream.zig");
 const Action = stream.Action;
 const Screen = @import("Screen.zig");
 const modes = @import("modes.zig");
+const osc = @import("osc.zig");
 const osc_color = @import("osc/parsers/color.zig");
 const kitty_color = @import("kitty/color.zig");
 const size_report = @import("size_report.zig");
@@ -252,6 +253,8 @@ pub const Handler = struct {
             .size_report => self.reportSize(value),
             .window_title => self.windowTitle(value.title),
             .xtversion => self.reportXtversion(),
+            .iterm2_set_user_var => try self.setSessionVariable(value.key, value.value),
+            .iterm2_report_variable => try self.reportSessionVariable(value.name, value.terminator),
 
             // No supported DCS commands have any terminal-modifying effects,
             // but they may in the future. For now we just ignore it.
@@ -274,6 +277,45 @@ pub const Handler = struct {
     inline fn writePty(self: *Handler, data: [:0]const u8) void {
         const func = self.effects.write_pty orelse return;
         func(self, data);
+    }
+
+    fn setSessionVariable(self: *Handler, key: []const u8, encoded_value: []const u8) !void {
+        const decoder = std.base64.standard.Decoder;
+        const size = decoder.calcSizeForSlice(encoded_value) catch return;
+        const alloc = self.terminal.gpa();
+        const buf = try alloc.alloc(u8, size);
+        defer alloc.free(buf);
+        decoder.decode(buf, encoded_value) catch return;
+        try self.terminal.setIterm2UserVariable(key, buf);
+    }
+
+    fn reportSessionVariable(
+        self: *Handler,
+        encoded_name: []const u8,
+        terminator: osc.Terminator,
+    ) !void {
+        if (self.effects.write_pty == null) return;
+
+        const decoder = std.base64.standard.Decoder;
+        const name_size = decoder.calcSizeForSlice(encoded_name) catch return;
+        const alloc = self.terminal.gpa();
+        const name_buf = try alloc.alloc(u8, name_size);
+        defer alloc.free(name_buf);
+        decoder.decode(name_buf, encoded_name) catch return;
+
+        const value = self.terminal.getSessionVariable(name_buf) orelse "";
+        const encoder = std.base64.standard.Encoder;
+        const encoded_value_size = encoder.calcSize(value.len);
+        const prefix = "\x1b]1337;ReportVariable=";
+        const suffix = terminator.string();
+        const response = try alloc.allocSentinel(u8, prefix.len + encoded_value_size + suffix.len, 0);
+        defer alloc.free(response);
+
+        @memcpy(response[0..prefix.len], prefix);
+        const encoded_value = encoder.encode(response[prefix.len .. prefix.len + encoded_value_size], value);
+        std.debug.assert(encoded_value.len == encoded_value_size);
+        @memcpy(response[prefix.len + encoded_value_size .. response.len], suffix);
+        self.writePty(response);
     }
 
     fn bell(self: *Handler) void {

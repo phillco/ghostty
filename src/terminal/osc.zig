@@ -64,6 +64,18 @@ pub const Command = union(Key) {
         value: [:0]const u8,
     },
 
+    /// iTerm2 OSC 1337 SetUserVar. The value is still base64-encoded here.
+    iterm2_set_user_var: struct {
+        key: [:0]const u8,
+        value: [:0]const u8,
+    },
+
+    /// iTerm2 OSC 1337 ReportVariable. The name is still base64-encoded here.
+    iterm2_report_variable: struct {
+        name: [:0]const u8,
+        terminator: Terminator,
+    },
+
     /// OSC 22. Set the mouse shape. There doesn't seem to be a standard
     /// naming scheme for cursors but it looks like terminals such as Foot
     /// are moving towards using the W3C CSS cursor names. For OSC parsing,
@@ -174,6 +186,8 @@ pub const Command = union(Key) {
             "semantic_prompt",
             "clipboard_contents",
             "report_pwd",
+            "iterm2_set_user_var",
+            "iterm2_report_variable",
             "mouse_shape",
             "color_operation",
             "kitty_color_protocol",
@@ -415,6 +429,8 @@ pub const Parser = struct {
             .hyperlink_end,
             .hyperlink_start,
             .invalid,
+            .iterm2_report_variable,
+            .iterm2_set_user_var,
             .mouse_shape,
             .report_pwd,
             .semantic_prompt,
