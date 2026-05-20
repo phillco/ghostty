@@ -4344,6 +4344,18 @@ const Link = struct {
     selection: terminal.Selection,
 };
 
+/// Returns the pin under the current cursor position, if it maps to a cell.
+///
+/// Requires the renderer mutex is held.
+fn linkPinAtPos(
+    self: *Surface,
+    pos: apprt.CursorPos,
+) !?terminal.Pin {
+    const screen: *terminal.Screen = self.renderer_state.terminal.screens.active;
+    const point = self.posToViewport(pos.x, pos.y);
+    return screen.pages.pin(.{ .viewport = point });
+}
+
 /// Returns the link at the given cursor position, if any.
 ///
 /// Requires the renderer mutex is held.
@@ -4351,15 +4363,9 @@ fn linkAtPos(
     self: *Surface,
     pos: apprt.CursorPos,
 ) !?Link {
-    // Convert our cursor position to a screen point.
-    const screen: *terminal.Screen = self.renderer_state.terminal.screens.active;
-    const mouse_pin: terminal.Pin = mouse_pin: {
-        const point = self.posToViewport(pos.x, pos.y);
-        const pin = screen.pages.pin(.{ .viewport = point }) orelse {
-            log.warn("failed to get pin for clicked point", .{});
-            return null;
-        };
-        break :mouse_pin pin;
+    const mouse_pin = (try self.linkPinAtPos(pos)) orelse {
+        log.warn("failed to get pin for clicked point", .{});
+        return null;
     };
 
     // Get our comparison mods
@@ -4376,6 +4382,30 @@ fn linkAtPos(
 
     // Fall back to configured links
     return try self.linkAtPin(mouse_pin, mouse_mods);
+}
+
+/// Returns the link at the given cursor position without requiring the
+/// configured hover modifiers. This is used by context menus, where the user
+/// has already explicitly asked for actions on the clicked item.
+///
+/// Requires the renderer mutex is held.
+fn linkAtPosIgnoringModifiers(
+    self: *Surface,
+    pos: apprt.CursorPos,
+) !?Link {
+    const mouse_pin = (try self.linkPinAtPos(pos)) orelse {
+        log.warn("failed to get pin for clicked point", .{});
+        return null;
+    };
+
+    const rac = mouse_pin.rowAndCell();
+    const cell = rac.cell;
+    if (cell.hyperlink) {
+        const sel = terminal.Selection.init(mouse_pin, mouse_pin, false);
+        return .{ .action = ._open_osc8, .selection = sel };
+    }
+
+    return try self.linkAtPin(mouse_pin, null);
 }
 
 /// Detects if a link is present at the given pin.
@@ -4454,6 +4484,13 @@ fn mouseModsWithCapture(self: *Surface, mods: input.Mods) input.Mods {
 /// Requires the renderer state mutex is held.
 fn processLinks(self: *Surface, pos: apprt.CursorPos) !bool {
     const link = try self.linkAtPos(pos) orelse return false;
+    return try self.processLink(link);
+}
+
+/// Invoke the action represented by a resolved link.
+///
+/// Requires the renderer state mutex is held.
+fn processLink(self: *Surface, link: Link) !bool {
     switch (link.action) {
         .open => {
             const str = try self.io.terminal.screens.active.selectionString(self.alloc, .{
@@ -4479,6 +4516,79 @@ fn processLinks(self: *Surface, pos: apprt.CursorPos) !bool {
     }
 
     return true;
+}
+
+/// Copy the URL represented by a resolved link to the default clipboard.
+///
+/// Requires the renderer state mutex is held.
+fn copyLinkToClipboard(self: *Surface, link_info: Link) !bool {
+    const url_text = switch (link_info.action) {
+        .open => url_text: {
+            // For regex links, get the text from the matched selection.
+            break :url_text (self.io.terminal.screens.active.selectionString(self.alloc, .{
+                .sel = link_info.selection,
+                .trim = self.config.clipboard_trim_trailing_spaces,
+            })) catch |err| {
+                log.err("error reading url string err={}", .{err});
+                return false;
+            };
+        },
+
+        ._open_osc8 => url_text: {
+            // For OSC8 links, get the URI directly from hyperlink data.
+            const uri = self.osc8URI(link_info.selection.start()) orelse {
+                log.warn("failed to get URI for OSC8 hyperlink", .{});
+                return false;
+            };
+            break :url_text try self.alloc.dupeZ(u8, uri);
+        },
+    };
+    defer self.alloc.free(url_text);
+
+    self.rt_surface.setClipboard(.standard, &.{.{
+        .mime = "text/plain",
+        .data = url_text,
+    }}, false) catch |err| {
+        log.err("error copying url to clipboard err={}", .{err});
+        return false;
+    };
+
+    return true;
+}
+
+/// Whether a link exists at the current mouse location, ignoring normal hover
+/// modifier requirements. Intended for explicit context-menu affordances.
+pub fn hasLinkAtCursor(self: *Surface) !bool {
+    const pos = try self.rt_surface.getCursorPos();
+
+    self.renderer_state.mutex.lock();
+    defer self.renderer_state.mutex.unlock();
+
+    return (try self.linkAtPosIgnoringModifiers(pos)) != null;
+}
+
+/// Open the link at the current mouse location, ignoring normal hover modifier
+/// requirements. Intended for explicit context-menu affordances.
+pub fn openLinkAtCursor(self: *Surface) !bool {
+    const pos = try self.rt_surface.getCursorPos();
+
+    self.renderer_state.mutex.lock();
+    defer self.renderer_state.mutex.unlock();
+
+    const link = try self.linkAtPosIgnoringModifiers(pos) orelse return false;
+    return try self.processLink(link);
+}
+
+/// Copy the link at the current mouse location, ignoring normal hover modifier
+/// requirements. Intended for explicit context-menu affordances.
+pub fn copyLinkAtCursor(self: *Surface) !bool {
+    const pos = try self.rt_surface.getCursorPos();
+
+    self.renderer_state.mutex.lock();
+    defer self.renderer_state.mutex.unlock();
+
+    const link = try self.linkAtPosIgnoringModifiers(pos) orelse return false;
+    return try self.copyLinkToClipboard(link);
 }
 
 fn openUrl(
@@ -5321,42 +5431,8 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
 
             self.renderer_state.mutex.lock();
             defer self.renderer_state.mutex.unlock();
-            if (try self.linkAtPos(pos)) |link_info| {
-                const url_text = switch (link_info.action) {
-                    .open => url_text: {
-                        // For regex links, get the text from selection
-                        break :url_text (self.io.terminal.screens.active.selectionString(self.alloc, .{
-                            .sel = link_info.selection,
-                            .trim = self.config.clipboard_trim_trailing_spaces,
-                        })) catch |err| {
-                            log.err("error reading url string err={}", .{err});
-                            return false;
-                        };
-                    },
-
-                    ._open_osc8 => url_text: {
-                        // For OSC8 links, get the URI directly from hyperlink data
-                        const uri = self.osc8URI(link_info.selection.start()) orelse {
-                            log.warn("failed to get URI for OSC8 hyperlink", .{});
-                            return false;
-                        };
-                        break :url_text try self.alloc.dupeZ(u8, uri);
-                    },
-                };
-                defer self.alloc.free(url_text);
-
-                self.rt_surface.setClipboard(.standard, &.{.{
-                    .mime = "text/plain",
-                    .data = url_text,
-                }}, false) catch |err| {
-                    log.err("error copying url to clipboard err={}", .{err});
-                    return false;
-                };
-
-                return true;
-            }
-
-            return false;
+            const link_info = try self.linkAtPos(pos) orelse return false;
+            return try self.copyLinkToClipboard(link_info);
         },
 
         .copy_title_to_clipboard => return try self.rt_app.performAction(

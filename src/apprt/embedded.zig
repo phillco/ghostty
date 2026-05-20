@@ -2067,6 +2067,32 @@ pub const CAPI = struct {
         surface.mousePressureCallback(stage, pressure);
     }
 
+    /// Returns true if a link exists under the current mouse location.
+    /// Unlike hover behavior, this ignores configured modifier requirements
+    /// because explicit context-menu actions should not require a held modifier.
+    export fn ghostty_surface_has_link_at_cursor(surface: *Surface) bool {
+        return surface.core_surface.hasLinkAtCursor() catch |err| {
+            log.err("error checking link at cursor err={}", .{err});
+            return false;
+        };
+    }
+
+    /// Open the link under the current mouse location.
+    export fn ghostty_surface_open_link_at_cursor(surface: *Surface) bool {
+        return surface.core_surface.openLinkAtCursor() catch |err| {
+            log.err("error opening link at cursor err={}", .{err});
+            return false;
+        };
+    }
+
+    /// Copy the link under the current mouse location to the default clipboard.
+    export fn ghostty_surface_copy_link_at_cursor(surface: *Surface) bool {
+        return surface.core_surface.copyLinkAtCursor() catch |err| {
+            log.err("error copying link at cursor err={}", .{err});
+            return false;
+        };
+    }
+
     export fn ghostty_surface_ime_point(
         surface: *Surface,
         x: *f64,

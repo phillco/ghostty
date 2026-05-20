@@ -1516,6 +1516,12 @@ extension Ghostty {
             // in a row without storing it all.
             var item: NSMenuItem
 
+            if let surface = self.surface, ghostty_surface_has_link_at_cursor(surface) {
+                menu.addItem(withTitle: "Open Link", action: #selector(openLink(_:)), keyEquivalent: "")
+                menu.addItem(withTitle: "Copy Link", action: #selector(copyLink(_:)), keyEquivalent: "")
+                menu.addItem(.separator())
+            }
+
             // If we have a selection, add copy
             if let text = self.accessibilitySelectedText(), text.count > 0 {
                 menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
@@ -1580,6 +1586,20 @@ extension Ghostty {
             let action = "paste_from_clipboard"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
                 AppDelegate.logger.warning("action failed action=\(action)")
+            }
+        }
+
+        @IBAction func openLink(_ sender: Any?) {
+            guard let surface = self.surface else { return }
+            if !ghostty_surface_open_link_at_cursor(surface) {
+                AppDelegate.logger.warning("action failed action=open_link_at_cursor")
+            }
+        }
+
+        @IBAction func copyLink(_ sender: Any?) {
+            guard let surface = self.surface else { return }
+            if !ghostty_surface_copy_link_at_cursor(surface) {
+                AppDelegate.logger.warning("action failed action=copy_link_at_cursor")
             }
         }
 
