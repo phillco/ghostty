@@ -606,18 +606,25 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         tabListenForFrame = window?.tabbedWindows?.count ?? 0 > 1
 
         if let windows = window?.tabbedWindows as? [TerminalWindow] {
-            for (tab, window) in zip(1..., windows) {
+            let tabButtons = window?.tabButtonsInVisualOrder() ?? []
+
+            for (index, terminalWindow) in windows.enumerated() {
+                let tab = index + 1
+                if let tabButton = tabButtons[safe: index] {
+                    tabButton.setAccessibilityIdentifier(terminalWindow.tabAccessibilityIdentifier)
+                }
+
                 // We need to clear any windows beyond this because they have had
                 // a keyEquivalent set previously.
                 guard tab <= 9 else {
-                    window.keyEquivalent = ""
+                    terminalWindow.keyEquivalent = ""
                     continue
                 }
 
                 if let equiv = ghostty.config.keyboardShortcut(for: "goto_tab:\(tab)") {
-                    window.keyEquivalent = "\(equiv)"
+                    terminalWindow.keyEquivalent = "\(equiv)"
                 } else {
-                    window.keyEquivalent = ""
+                    terminalWindow.keyEquivalent = ""
                 }
             }
         }
@@ -1026,6 +1033,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         let focusedSurface: UUID?
         let tabIndex: Int?
         weak var tabGroup: NSWindowTabGroup?
+        let tabID: UUID?
         let tabColor: TerminalTabColor
     }
 
@@ -1037,6 +1045,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         if let window {
             window.setFrame(undoState.frame, display: true)
             if let terminalWindow = window as? TerminalWindow {
+                if let tabID = undoState.tabID {
+                    terminalWindow.tabID = tabID
+                }
                 terminalWindow.tabColor = undoState.tabColor
             }
 
@@ -1082,6 +1093,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             focusedSurface: focusedSurface?.id,
             tabIndex: window.tabGroup?.windows.firstIndex(of: window),
             tabGroup: window.tabGroup,
+            tabID: (window as? TerminalWindow)?.tabID,
             tabColor: (window as? TerminalWindow)?.tabColor ?? .none)
     }
 

@@ -5,6 +5,8 @@ import GhosttyKit
 /// The base class for all standalone, "normal" terminal windows. This sets the basic
 /// style and configuration of the window based on the app configuration.
 class TerminalWindow: NSWindow {
+    static let tabAccessibilityIdentifierPrefix = "ghostty-tab:"
+
     /// Posted when a terminal window awakes from nib.
     static let terminalDidAwake = Notification.Name("TerminalWindowDidAwake")
 
@@ -56,6 +58,20 @@ class TerminalWindow: NSWindow {
     /// Gets the terminal controller from the window controller.
     var terminalController: TerminalController? {
         windowController as? TerminalController
+    }
+
+    /// Stable identifier for this native AppKit tab. A tab can contain multiple
+    /// surfaces, so this intentionally does not reuse a surface UUID.
+    var tabID: UUID = UUID() {
+        didSet {
+            guard tabID != oldValue else { return }
+            invalidateRestorableState()
+            terminalController?.relabelTabs()
+        }
+    }
+
+    var tabAccessibilityIdentifier: String {
+        "\(Self.tabAccessibilityIdentifierPrefix)\(tabID.uuidString)"
     }
 
     /// The color assigned to this window's tab. Setting this updates the tab color indicator

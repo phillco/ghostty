@@ -46,6 +46,7 @@ class TerminalRestorableState: TerminalRestorable {
     let focusedSurface: String?
     let surfaceTree: SplitTree<Ghostty.SurfaceView>
     let effectiveFullscreenMode: FullscreenMode?
+    let tabID: String?
     let tabColor: TerminalTabColor
     let titleOverride: String?
 
@@ -53,6 +54,7 @@ class TerminalRestorableState: TerminalRestorable {
         self.focusedSurface = controller.focusedSurface?.id.uuidString
         self.surfaceTree = controller.surfaceTree
         self.effectiveFullscreenMode = controller.fullscreenStyle?.fullscreenMode
+        self.tabID = (controller.window as? TerminalWindow)?.tabID.uuidString
         self.tabColor = (controller.window as? TerminalWindow)?.tabColor ?? .none
         self.titleOverride = controller.titleOverride
     }
@@ -61,6 +63,7 @@ class TerminalRestorableState: TerminalRestorable {
         self.surfaceTree = other.surfaceTree
         self.focusedSurface = other.focusedSurface
         self.effectiveFullscreenMode = other.effectiveFullscreenMode
+        self.tabID = other.tabID
         self.tabColor = other.tabColor
         self.titleOverride = other.titleOverride
     }
@@ -119,6 +122,12 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         guard let window = c.window else {
             completionHandler(nil, TerminalRestoreError.windowDidNotLoad)
             return
+        }
+
+        // Restore the stable tab identifier if present. Older saved states do
+        // not have this value, in which case the window keeps its fresh UUID.
+        if let tabID = state.tabID.flatMap(UUID.init(uuidString:)) {
+            (window as? TerminalWindow)?.tabID = tabID
         }
 
         // Restore our tab color
@@ -189,4 +198,3 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
         }
     }
 }
-
