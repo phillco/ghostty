@@ -20,6 +20,7 @@ const CoreInspector = @import("../inspector/main.zig").Inspector;
 const CoreSurface = @import("../Surface.zig");
 const configpkg = @import("../config.zig");
 const Config = configpkg.Config;
+const String = @import("../main_c.zig").String;
 
 const log = std.log.scoped(.embedded_window);
 
@@ -335,6 +336,7 @@ pub const App = struct {
     ) (Allocator.Error || std.posix.WriteError || apprt.ipc.Errors)!bool {
         switch (action) {
             .new_window => return false,
+            .toggle_quick_terminal => return false,
         }
     }
 };
@@ -1303,23 +1305,6 @@ pub const CAPI = struct {
         }
     };
 
-    // ghostty_string_s
-    const String = extern struct {
-        ptr: ?[*]const u8,
-        len: usize,
-        sentinel: bool,
-
-        pub fn deinit(self: *String) void {
-            const ptr = self.ptr orelse return;
-            if (self.sentinel) {
-                global.alloc.free(ptr[0..self.len :0]);
-            } else {
-                global.alloc.free(ptr[0..self.len]);
-            }
-            self.* = .{ .ptr = null, .len = 0, .sentinel = false };
-        }
-    };
-
     // ghostty_selection_range_s
     const SelectionRange = extern struct {
         location: u32,
@@ -1494,8 +1479,8 @@ pub const CAPI = struct {
     /// if it were sent to the surface right now. The "right now"
     /// is important because things like trigger sequences are only
     /// valid until the next key event.
-    export fn ghostty_app_key_is_binding(
-        app: *App,
+    export fn ghostty_config_key_is_binding(
+        config: *Config,
         event: KeyEvent,
     ) bool {
         const core_event = event.keyEvent().core() orelse {
@@ -1503,7 +1488,7 @@ pub const CAPI = struct {
             return false;
         };
 
-        return app.core_app.keyEventIsBinding(app, core_event);
+        return config.keyEventIsBinding(core_event);
     }
 
     /// Notify the app that the keyboard was changed. This causes the
@@ -1712,11 +1697,7 @@ pub const CAPI = struct {
 
     fn allocString(slice: []const u8) !String {
         const copy = try global.alloc.dupe(u8, slice);
-        return .{
-            .ptr = copy.ptr,
-            .len = copy.len,
-            .sentinel = false,
-        };
+        return .fromSlice(copy);
     }
 
     /// Set a per-session terminal variable.
@@ -1888,6 +1869,23 @@ pub const CAPI = struct {
             .cell_width_px = surface.core_surface.size.cell.width,
             .cell_height_px = surface.core_surface.size.cell.height,
         };
+    }
+
+    /// Returns the PID of the foreground process for the surface PTY.
+    export fn ghostty_surface_foreground_pid(surface: *Surface) u64 {
+        return surface.core_surface.getProcessInfo(.foreground_pid) orelse 0;
+    }
+
+    /// Returns the PTY name for the surface. The returned string must be
+    /// freed by the caller via ghostty_string_free.
+    export fn ghostty_surface_tty_name(surface: *Surface) String {
+        const tty_name = surface.core_surface.getProcessInfo(.tty_name) orelse return .empty;
+        const copy = surface.app.core_app.alloc.dupeZ(u8, tty_name) catch |err| {
+            log.err("error allocating tty name err={}", .{err});
+            return .empty;
+        };
+
+        return .fromSlice(copy);
     }
 
     /// Update the color scheme of the surface.

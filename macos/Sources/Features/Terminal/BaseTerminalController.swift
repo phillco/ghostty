@@ -289,7 +289,8 @@ class BaseTerminalController: NSWindowController,
             ghostty,
             tree: detachedTree,
             position: position,
-            confirmUndo: false)
+            confirmUndo: false,
+            inheritBackgroundOpacity: isBackgroundOpaque)
     }
 
     /// Move focus to a surface view.
@@ -1067,11 +1068,15 @@ class BaseTerminalController: NSWindowController,
         // Do nothing if in fullscreen (transparency doesn't apply in fullscreen)
         guard let window, !window.styleMask.contains(.fullScreen) else { return }
 
-        // Toggle between transparent and opaque
-        isBackgroundOpaque.toggle()
+        let newValue = !isBackgroundOpaque
+        let controllers = NSApplication.shared.windows.compactMap {
+            $0.windowController as? BaseTerminalController
+        }
 
-        // Update our appearance
-        syncAppearance()
+        for controller in controllers {
+            controller.isBackgroundOpaque = newValue
+            controller.syncAppearance()
+        }
     }
 
     /// Override this to resync any appearance related properties. This will be called automatically
@@ -1484,6 +1489,21 @@ class BaseTerminalController: NSWindowController,
 
     @IBAction func toggleCommandPalette(_ sender: Any?) {
         commandPaletteIsShowing.toggle()
+        if commandPaletteIsShowing {
+            // Fix the incorrect focus when toggling from InlineTitleEditor
+            // When toggling the command palette from the inline title editor,
+            // the first responder state of the surface is changed quickly from true to false.
+
+            // `makeFirstResponder:` is called by the title editor when finishing,
+            // but it happens **after** the command palette is shown,
+            // so the `focused` is set to `true` while the command palette is shown.
+            // (Could be an AppKit issue as well, since the resign is not called after but the command palette is receiving `keyDown`).
+
+            // Since `performKeyEquivalent(with:)` is called on all of the subviews
+            // until one of the return `true` so the paste action is consumed by the surface
+            // instead of the first responder (command palette).
+            _ = focusedSurface?.resignFirstResponder()
+        }
     }
 
     @IBAction func find(_ sender: Any) {
