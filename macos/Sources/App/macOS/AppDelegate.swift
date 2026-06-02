@@ -75,6 +75,7 @@ class AppDelegate: NSObject,
     @IBOutlet private var menuQuickTerminal: NSMenuItem?
     @IBOutlet private var menuTerminalInspector: NSMenuItem?
     @IBOutlet private var menuCommandPalette: NSMenuItem?
+    @IBOutlet private var menuTabOverview: NSMenuItem?
 
     @IBOutlet private var menuEqualizeSplits: NSMenuItem?
     @IBOutlet private var menuMoveSplitDividerUp: NSMenuItem?
@@ -341,6 +342,7 @@ class AppDelegate: NSObject,
     func applicationDidBecomeActive(_ notification: Notification) {
         // If we're back manually then clear the hidden state because macOS handles it.
         self.hiddenState = nil
+        ensureCustomTabOverviewMenuItem()
 
         // First launch stuff
         if !applicationHasBecomeActive {
@@ -568,6 +570,13 @@ class AppDelegate: NSObject,
     }
 
     private func localEventKeyDown(_ event: NSEvent) -> NSEvent? {
+        if event.keyCode == 0x2A, // Backslash
+           event.modifierFlags.intersection([.shift, .control, .option, .command]) == [.command],
+           let controller = NSApp.keyWindow?.windowController as? BaseTerminalController {
+            controller.toggleTabOverview(nil)
+            return nil
+        }
+
         // If the tab overview is visible and escape is pressed, close it.
         // This can't POSSIBLY be right and is probably a FirstResponder problem
         // that we should handle elsewhere in our program. But this works and it
@@ -629,6 +638,9 @@ class AppDelegate: NSObject,
 
     @objc private func windowDidBecomeKey(_ notification: Notification) {
         syncFloatOnTopMenu(notification.object as? NSWindow)
+        Task { @MainActor [weak self] in
+            self?.ensureCustomTabOverviewMenuItem()
+        }
     }
 
     @objc private func quickTerminalDidChangeVisibility(_ notification: Notification) {
@@ -1097,7 +1109,40 @@ extension AppDelegate {
         dockMenu.addItem(newTab)
     }
 
-    /// Setup all the images for our menu items.
+    /// Setup all of the images for our menu items.
+    @MainActor private func ensureCustomTabOverviewMenuItem() {
+        guard let viewMenu = NSApp.mainMenu?
+            .items
+            .first(where: { $0.title == "View" })?
+            .submenu
+        else {
+            return
+        }
+
+        if let item = viewMenu.items.first(where: { $0.title == "Ghostty Tab Overview" }) {
+            menuTabOverview = item
+            return
+        }
+
+        guard let commandPaletteIndex = viewMenu.items.firstIndex(where: {
+            $0 === menuCommandPalette || $0.title == "Command Palette"
+        }) else {
+            return
+        }
+
+        let item = NSMenuItem(
+            title: "Ghostty Tab Overview",
+            action: #selector(toggleCustomTabOverview(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.setImageIfDesired(systemSymbolName: "rectangle.grid.2x2")
+        viewMenu.insertItem(item, at: commandPaletteIndex + 1)
+        menuTabOverview = item
+        syncMenuShortcut(ghostty.config, action: "toggle_tab_overview", menuItem: item)
+    }
+
+    /// Setup all of the images for our menu items.
     private func setupMenuImages() {
         // Note: This COULD Be done all in the xib file, but I find it easier to
         // modify this stuff as code.
@@ -1118,6 +1163,7 @@ extension AppDelegate {
         self.menuResetFontSize?.setImageIfDesired(systemSymbolName: "textformat.size")
         self.menuDecreaseFontSize?.setImageIfDesired(systemSymbolName: "textformat.size.smaller")
         self.menuCommandPalette?.setImageIfDesired(systemSymbolName: "filemenu.and.selection")
+        self.menuTabOverview?.setImageIfDesired(systemSymbolName: "rectangle.grid.2x2")
         self.menuQuickTerminal?.setImageIfDesired(systemSymbolName: "apple.terminal")
         self.menuChangeTabTitle?.setImageIfDesired(systemSymbolName: "pencil.line")
         self.menuTerminalInspector?.setImageIfDesired(systemSymbolName: "scope")
@@ -1200,6 +1246,7 @@ extension AppDelegate {
         syncMenuShortcut(config, action: "toggle_window_float_on_top", menuItem: self.menuFloatOnTop)
         syncMenuShortcut(config, action: "inspector:toggle", menuItem: self.menuTerminalInspector)
         syncMenuShortcut(config, action: "toggle_command_palette", menuItem: self.menuCommandPalette)
+        syncMenuShortcut(config, action: "toggle_tab_overview", menuItem: self.menuTabOverview)
 
         syncMenuShortcut(config, action: "toggle_secure_input", menuItem: self.menuSecureInput)
 
@@ -1249,6 +1296,11 @@ extension AppDelegate {
         } else {
             ud.removeObject(forKey: key)
         }
+    }
+
+    @IBAction func toggleCustomTabOverview(_ sender: Any?) {
+        guard let controller = NSApp.keyWindow?.windowController as? BaseTerminalController else { return }
+        controller.toggleTabOverview(sender)
     }
 
     @IBAction func setAsDefaultTerminal(_ sender: NSMenuItem) {

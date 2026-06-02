@@ -6936,6 +6936,12 @@ pub const Keybinds = struct {
         if (comptime builtin.target.os.tag.isDarwin()) {
             try self.set.put(
                 alloc,
+                .{ .key = .{ .unicode = '\\' }, .mods = .{ .super = true } },
+                .toggle_tab_overview,
+            );
+
+            try self.set.put(
+                alloc,
                 .{ .key = .{ .unicode = 'q' }, .mods = .{ .super = true } },
                 .{ .quit = {} },
             );
