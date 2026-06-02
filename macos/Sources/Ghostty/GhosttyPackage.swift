@@ -406,6 +406,12 @@ extension Ghostty.Notification {
     /// Present terminal. Bring the surface's window to focus without activating the app.
     static let ghosttyPresentTerminal = Notification.Name("com.mitchellh.ghostty.presentTerminal")
 
+    /// Toggle the custom tab overview for the current terminal window.
+    static let ghosttyToggleTabOverview = Notification.Name("com.mitchellh.ghostty.toggleTabOverview")
+    static let ghosttyTabOverviewMove = Notification.Name("com.mitchellh.ghostty.tabOverviewMove")
+    static let ghosttyTabOverviewSelect = Notification.Name("com.mitchellh.ghostty.tabOverviewSelect")
+    static let ghosttyTabOverviewActivate = Notification.Name("com.mitchellh.ghostty.tabOverviewActivate")
+
     /// Toggle fullscreen of current window
     static let ghosttyToggleFullscreen = Notification.Name("com.mitchellh.ghostty.toggleFullscreen")
     static let FullscreenModeKey = ghosttyToggleFullscreen.rawValue

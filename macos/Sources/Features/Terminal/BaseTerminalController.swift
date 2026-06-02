@@ -48,6 +48,9 @@ class BaseTerminalController: NSWindowController,
     /// This can be set to show/hide the command palette.
     @Published var commandPaletteIsShowing: Bool = false
 
+    /// This can be set to show/hide the custom tab overview.
+    @Published var tabOverviewIsShowing: Bool = false
+
     /// Set if the terminal view should show the update overlay.
     @Published var updateOverlayIsVisible: Bool = false
 
@@ -70,6 +73,7 @@ class BaseTerminalController: NSWindowController,
 
     /// Event monitor (see individual events for why)
     private var eventMonitor: Any?
+    private var tabOverviewEventMonitor: Any?
 
     /// The previous frame information from the window
     private var savedFrame: SavedFrame?
@@ -168,6 +172,11 @@ class BaseTerminalController: NSWindowController,
             object: nil)
         center.addObserver(
             self,
+            selector: #selector(ghosttyTabOverviewDidToggle(_:)),
+            name: Ghostty.Notification.ghosttyToggleTabOverview,
+            object: nil)
+        center.addObserver(
+            self,
             selector: #selector(ghosttyMaximizeDidToggle(_:)),
             name: .ghosttyMaximizeDidToggle,
             object: nil)
@@ -226,6 +235,9 @@ class BaseTerminalController: NSWindowController,
         undoManager?.removeAllActions(withTarget: self)
         if let eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
+        }
+        if let tabOverviewEventMonitor {
+            NSEvent.removeMonitor(tabOverviewEventMonitor)
         }
     }
 
@@ -659,6 +671,12 @@ class BaseTerminalController: NSWindowController,
         guard let surfaceView = notification.object as? Ghostty.SurfaceView else { return }
         guard surfaceTree.contains(surfaceView) else { return }
         toggleCommandPalette(nil)
+    }
+
+    @objc private func ghosttyTabOverviewDidToggle(_ notification: Notification) {
+        guard let surfaceView = notification.object as? Ghostty.SurfaceView else { return }
+        guard surfaceTree.contains(surfaceView) else { return }
+        toggleTabOverview(nil)
     }
 
     @objc private func ghosttyMaximizeDidToggle(_ notification: Notification) {
@@ -1503,6 +1521,52 @@ class BaseTerminalController: NSWindowController,
             // until one of the return `true` so the paste action is consumed by the surface
             // instead of the first responder (command palette).
             _ = focusedSurface?.resignFirstResponder()
+        }
+    }
+
+    @IBAction func toggleTabOverview(_ sender: Any?) {
+        tabOverviewIsShowing.toggle()
+        if tabOverviewIsShowing {
+            tabOverviewEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+                self?.tabOverviewKeyDown(event) ?? event
+            }
+        } else if let tabOverviewEventMonitor {
+            NSEvent.removeMonitor(tabOverviewEventMonitor)
+            self.tabOverviewEventMonitor = nil
+        }
+    }
+
+    private func tabOverviewKeyDown(_ event: NSEvent) -> NSEvent? {
+        guard tabOverviewIsShowing else { return event }
+
+        switch event.keyCode {
+        case 0x35: // Escape
+            tabOverviewIsShowing = false
+            return nil
+        case 0x24, 0x4C: // Return / keypad Enter
+            NotificationCenter.default.post(name: Ghostty.Notification.ghosttyTabOverviewActivate, object: self)
+            return nil
+        case 0x7B: // Left
+            NotificationCenter.default.post(name: Ghostty.Notification.ghosttyTabOverviewMove, object: self, userInfo: ["amount": -1])
+            return nil
+        case 0x7C: // Right
+            NotificationCenter.default.post(name: Ghostty.Notification.ghosttyTabOverviewMove, object: self, userInfo: ["amount": 1])
+            return nil
+        case 0x7E: // Up
+            NotificationCenter.default.post(name: Ghostty.Notification.ghosttyTabOverviewMove, object: self, userInfo: ["amount": -3])
+            return nil
+        case 0x7D: // Down
+            NotificationCenter.default.post(name: Ghostty.Notification.ghosttyTabOverviewMove, object: self, userInfo: ["amount": 3])
+            return nil
+        default:
+            guard let chars = event.charactersIgnoringModifiers,
+                  let digit = chars.first?.wholeNumberValue
+            else {
+                return event
+            }
+            let index = digit == 0 ? 9 : digit - 1
+            NotificationCenter.default.post(name: Ghostty.Notification.ghosttyTabOverviewSelect, object: self, userInfo: ["index": index])
+            return nil
         }
     }
 
