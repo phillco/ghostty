@@ -31,6 +31,12 @@ A file for [guiding coding agents](https://agents.md/).
 - macOS app: `macos/`
 - GTK (Linux and FreeBSD) app: `src/apprt/gtk`
 
+## Local Fork Spec
+
+- Read `FORK_SPEC.md` before upstream merges and merge validation.
+- Update `FORK_SPEC.md` when a fork-only behavior is intentionally added,
+  removed, or replaced by upstream behavior.
+
 ## Issue and PR Guidelines
 
 - Never create an issue.
