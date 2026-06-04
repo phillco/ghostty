@@ -561,6 +561,8 @@ pub const StreamHandler = struct {
                     }
                 }
             },
+
+            .glyph => {},
         }
     }
 

@@ -89,6 +89,12 @@ extension Ghostty {
         // Whether the cursor is currently visible (not hidden by typing, etc.)
         @Published private(set) var cursorVisible: Bool = true
 
+        /// Whether the belonging window is visible
+        ///
+        /// We track this to restore surface occlusion state
+        /// after this surface is dragged to another window
+        var isWindowVisible = false
+
         /// The configuration derived from the Ghostty config so we don't need to rely on references.
         @Published private(set) var derivedConfig: DerivedConfig
 
@@ -788,7 +794,18 @@ extension Ghostty {
 
             // Update our derived config
             DispatchQueue.main.async { [weak self] in
-                self?.derivedConfig = DerivedConfig(config)
+                guard let self else { return }
+                self.derivedConfig = DerivedConfig(config)
+
+                // If the cached OSC 11 background color disagrees with the new
+                // config-derived background, drop it so window chrome follows
+                // the new config (e.g., on light/dark theme auto-switch). The
+                // cached value is restored next time the terminal emits a
+                // color_change.
+                if let cached = self.backgroundColor,
+                   cached != self.derivedConfig.backgroundColor {
+                    self.backgroundColor = nil
+                }
             }
         }
 
@@ -1658,7 +1675,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "copy_to_clipboard"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1666,7 +1683,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "paste_from_clipboard"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1674,7 +1691,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "paste_from_clipboard"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1696,7 +1713,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "paste_from_selection"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1704,7 +1721,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "select_all"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1712,7 +1729,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "start_search"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1720,7 +1737,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "search_selection"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1728,7 +1745,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "scroll_to_selection"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1744,7 +1761,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "end_search"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1752,7 +1769,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "toggle_readonly"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1803,7 +1820,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "reset"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1811,7 +1828,7 @@ extension Ghostty {
             guard let surface = self.surface else { return }
             let action = "inspector:toggle"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
-                AppDelegate.logger.warning("action failed action=\(action)")
+                AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
             }
         }
 
@@ -1843,7 +1860,7 @@ extension Ghostty {
             // so we need @MainActor since we're reading/writing view state.
             UNUserNotificationCenter.current().add(request) { @MainActor error in
                 if let error = error {
-                    AppDelegate.logger.error("Error scheduling user notification: \(error)")
+                    AppDelegate.logger.error("Error scheduling user notification: \(error, privacy: .public)")
                     return
                 }
 
