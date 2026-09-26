@@ -396,6 +396,7 @@ typedef struct {
   const char* text;
   uint32_t unshifted_codepoint;
   bool composing;
+  bool preserve_viewport;
 } ghostty_input_key_s;
 
 typedef enum {

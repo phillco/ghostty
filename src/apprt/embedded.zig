@@ -109,6 +109,7 @@ pub const App = struct {
         text: ?[:0]const u8,
         unshifted_codepoint: u32,
         composing: bool,
+        preserve_viewport: bool = false,
 
         /// Convert a libghostty key event into a core key event.
         fn core(self: KeyEvent) ?input.KeyEvent {
@@ -132,6 +133,7 @@ pub const App = struct {
                 .composing = self.composing,
                 .utf8 = text,
                 .unshifted_codepoint = unshifted_codepoint,
+                .preserve_viewport = self.preserve_viewport,
             };
         }
     };
@@ -1519,6 +1521,7 @@ pub const CAPI = struct {
         text: ?[*:0]const u8,
         unshifted_codepoint: u32,
         composing: bool,
+        preserve_viewport: bool,
 
         /// Convert to Zig key event.
         fn keyEvent(self: KeyEvent) App.KeyEvent {
@@ -1536,6 +1539,7 @@ pub const CAPI = struct {
                 .text = if (self.text) |ptr| std.mem.sliceTo(ptr, 0) else null,
                 .unshifted_codepoint = self.unshifted_codepoint,
                 .composing = self.composing,
+                .preserve_viewport = self.preserve_viewport,
             };
         }
     };

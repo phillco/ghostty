@@ -3068,7 +3068,11 @@ pub fn keyCallback(
             try self.setSelection(null);
         }
 
-        if (self.config.scroll_to_bottom.keystroke) self.io.terminal.scrollViewport(.bottom);
+        if (self.config.scroll_to_bottom.keystroke and
+            !event.preserve_viewport)
+        {
+            self.io.terminal.scrollViewport(.bottom);
+        }
 
         try self.queueRender();
     }
@@ -6401,11 +6405,13 @@ fn completeClipboardPaste(
             return error.UnsafePaste;
         }
 
-        // With the lock held, we must scroll to the bottom.
-        // We always scroll to the bottom for these inputs.
-        self.scrollToBottom() catch |err| {
-            log.warn("error scrolling to bottom err={}", .{err});
-        };
+        // With the lock held, scroll to the bottom unless the user has
+        // opted out of scrolling on paste.
+        if (self.config.scroll_to_bottom.paste) {
+            self.scrollToBottom() catch |err| {
+                log.warn("error scrolling to bottom err={}", .{err});
+            };
+        }
 
         break :encode_opts opts;
     };

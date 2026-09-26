@@ -2,6 +2,17 @@ import Cocoa
 import GhosttyKit
 
 extension NSEvent {
+    /// Marker placed in `eventSourceUserData` by synthetic-input tools (e.g.
+    /// SpeechLab dictation) that ask Ghostty not to scroll to the bottom for
+    /// this key event. ASCII "GHSTNOSC".
+    static let ghosttyPreserveViewportMarker: Int64 = 0x4748_5354_4E4F_5343
+
+    /// Whether this event was posted with the preserve-viewport marker.
+    var preservesViewport: Bool {
+        guard type == .keyDown || type == .keyUp || type == .flagsChanged else { return false }
+        return cgEvent?.getIntegerValueField(.eventSourceUserData) == Self.ghosttyPreserveViewportMarker
+    }
+
     /// Create a Ghostty key event for a given keyboard action.
     ///
     /// This will not set the "text" or "composing" fields since these can't safely be set
@@ -22,6 +33,7 @@ extension NSEvent {
         // We have to let the caller handle this.
         key_ev.text = nil
         key_ev.composing = false
+        key_ev.preserve_viewport = preservesViewport
 
         // macOS provides no easy way to determine the consumed modifiers for
         // producing text. We apply a simple heuristic here that has worked for years

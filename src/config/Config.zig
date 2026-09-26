@@ -942,7 +942,12 @@ palette: Palette = .{},
 /// - `output` If set, scroll the surface to the bottom if there is new data
 ///   to display (e.g., when new lines are printed to the terminal).
 ///
-/// The default is `keystroke, no-output`.
+/// - `paste` If set, scroll the surface to the bottom when text is pasted
+///   into the terminal. Disabling this keeps the viewport where it is so
+///   that pasted input (e.g. from a dictation tool) does not jump away from
+///   scrollback you are reading.
+///
+/// The default is `keystroke, no-output, paste`.
 @"scroll-to-bottom": ScrollToBottom = .default,
 
 /// Determines whether running programs can detect the shift key pressed with a
@@ -10541,6 +10546,7 @@ pub const Scrollbar = enum {
 pub const ScrollToBottom = packed struct {
     keystroke: bool = true,
     output: bool = false,
+    paste: bool = true,
 
     pub const default: ScrollToBottom = .{};
 };
