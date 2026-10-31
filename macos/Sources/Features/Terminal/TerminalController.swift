@@ -350,13 +350,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         tree: SplitTree<Ghostty.SurfaceView>,
         position: NSPoint? = nil,
         confirmUndo: Bool = true,
-        inheritBackgroundOpacity: Bool? = nil
+        inheritBackgroundOpacity: Bool? = nil,
+        background: Bool = false,
+        registerUndo: Bool = true
     ) -> TerminalController {
         // Calculate the target frame based on the tree's view bounds
         // before moving into the new window
         let treeSize: CGSize? = tree.root?.viewBounds()
 
         let c = TerminalController.init(ghostty, withSurfaceTree: tree)
+        c.focusOnAppear = !background
+        c.focusedSurface = tree.root?.leftmostLeaf()
         if let inheritBackgroundOpacity {
             c.isBackgroundOpaque = inheritBackgroundOpacity
         }
@@ -364,7 +368,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // Showing window in current event loop works so far with dragging surface into
         // a new window, but remember to defer the cascade when you move it inside
         // `scheduleInitialPresentation` to solve other issues in the future.
-        c.showWindowSafely(self)
+        if background {
+            c.window?.orderBack(nil)
+        } else {
+            c.showWindowSafely(self)
+        }
         c.scheduleInitialPresentation {
             if let window = c.window {
                 // If we have a tree size, resize the window's content to match
@@ -386,7 +394,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
 
         // Setup our undo
-        if let undoManager = c.undoManager {
+        if registerUndo, let undoManager = c.undoManager {
             undoManager.setActionName("New Window")
             undoManager.registerUndo(
                 withTarget: c,
@@ -407,7 +415,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                     _ = TerminalController.newWindow(
                         ghostty,
                         tree: tree,
-                        inheritBackgroundOpacity: inheritBackgroundOpacity
+                        position: position,
+                        confirmUndo: confirmUndo,
+                        inheritBackgroundOpacity: inheritBackgroundOpacity,
+                        background: background
                     )
                 }
             }
@@ -420,15 +431,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         _ ghostty: Ghostty.App,
         from parent: NSWindow? = nil,
         withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil,
-        withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil
+        withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
+        background: Bool = false,
+        registerUndo: Bool = true,
+        onTabCreated: (() -> Void)? = nil
     ) -> TerminalController? {
         // Making sure that we're dealing with a TerminalController. If not,
         // then we just create a new window.
         guard let parent,
               let parentController = parent.windowController as? TerminalController else {
-            if let tree {
-                return newWindow(ghostty, tree: tree)
-            }
+            if tree != nil { return nil }
 
             return newWindow(ghostty, withBaseConfig: baseConfig, withParent: parent)
         }
@@ -446,13 +458,19 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             return nil
         }
 
+        // A background action must not unminimize or activate its source.
+        guard !background || !parent.isMiniaturized else { return nil }
+        let selectedWindow = parent.tabGroup?.selectedWindow ?? parent
+
         // Create a new window and add it to the parent
         let controller = TerminalController.init(
             ghostty,
             withBaseConfig: baseConfig,
             withSurfaceTree: tree)
+        controller.focusOnAppear = !background
+        controller.focusedSurface = tree?.root?.leftmostLeaf()
         controller.isBackgroundOpaque = parentController.isBackgroundOpaque
-        guard let window = controller.window else { return controller }
+        guard let window = controller.window else { return nil }
 
         // If the parent is miniaturized, then macOS exhibits really strange behaviors
         // so we have to bring it back out.
@@ -471,8 +489,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
 
         // If we don't allow tabs then we create a new window instead.
+        var tabCreated = false
         if window.tabbingMode != .disallowed {
-            let tabCreated: Bool
             // Add the window to the tab group and show it.
             switch ghostty.config.windowNewTabPosition {
             case "end":
@@ -488,21 +506,25 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             default:
                 tabCreated = parent.addTabbedWindowSafely(window, ordered: .above)
             }
-            if tabCreated {
-                // We set the selectedWindow early here because we want the next window
-                // to become first responder as quickly as possible. Usually this is
-                // set while `-[NSWindowController showWindow:]` is called, but we're
-                // dispatching it to resolve other issues.
-                parent.tabGroup?.selectedWindow = window
-            }
         }
 
-        // showWindow makes regular windows key and ordered front. AppKit can
-        // throw while selecting a tab if its fullscreen stack is inconsistent,
-        // so this must cross the Objective-C exception bridge.
-        // We don't need to dispatch this because `tabbingMode = .disallowed`
-        // for HiddenTitlebarTerminalWindow.
-        controller.showWindowSafely(self)
+        // A failed attachment must leave the source tree and its undo stack intact.
+        // Ordinary new-tab requests retain upstream's fallback to a standalone window.
+        if tree != nil && !tabCreated {
+            controller.surfaceTree = .init()
+            return nil
+        }
+
+        // Promotion commits its source-tree mutation only after attachment succeeds,
+        // before registering the destination's undo action or presenting either view.
+        onTabCreated?()
+
+        if background {
+            parent.tabGroup?.selectedWindow = selectedWindow
+        } else {
+            if tabCreated { parent.tabGroup?.selectedWindow = window }
+            controller.showWindowSafely(self)
+        }
 
         // Windows with `macos-titlebar-style = hidden` create new windows when the
         // new tab binding is pressed, we should cascade those windows as well.
@@ -510,17 +532,17 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // We're dispatching this async because otherwise the lastCascadePoint doesn't
         // take effect after position in `showWindow`. Our best theory is there is some
         // next-event-loop-tick logic that Cocoa is doing that we need to be after.
-        controller.scheduleInitialPresentation {
-            // Only cascade if we aren't fullscreen and are alone in the tab group.
-            if !window.styleMask.contains(.fullScreen) &&
-                window.tabGroup?.windows.count ?? 1 == 1 {
-                let hasFixedPos = controller.derivedConfig.windowPositionX != nil && controller.derivedConfig.windowPositionY != nil
-                Self.applyCascade(to: window, hasFixedPos: hasFixedPos)
-            }
+        if !background {
+            controller.scheduleInitialPresentation {
+                // Only cascade if we aren't fullscreen and are alone in the tab group.
+                if !window.styleMask.contains(.fullScreen) &&
+                    window.tabGroup?.windows.count ?? 1 == 1 {
+                    let hasFixedPos = controller.derivedConfig.windowPositionX != nil && controller.derivedConfig.windowPositionY != nil
+                    Self.applyCascade(to: window, hasFixedPos: hasFixedPos)
+                }
 
-            // We also activate our app so that it becomes front. This may be
-            // necessary for the dock menu.
-            NSApp.activate(ignoringOtherApps: true)
+                NSApp.activate(ignoringOtherApps: true)
+            }
         }
 
         // It takes an event loop cycle until the macOS tabGroup state becomes
@@ -532,7 +554,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
 
         // Setup our undo
-        if let undoManager = parentController.undoManager {
+        if registerUndo, let undoManager = parentController.undoManager {
             undoManager.setActionName("New Tab")
             undoManager.registerUndo(
                 withTarget: controller,
@@ -540,7 +562,11 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             ) { target in
                 // Close the tab when undoing
                 undoManager.disableUndoRegistration {
-                    target.closeTab(nil)
+                    if tree != nil {
+                        target.closeTabImmediately()
+                    } else {
+                        target.closeTab(nil)
+                    }
                 }
 
                 // Register redo action
@@ -552,7 +578,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                         ghostty,
                         from: parent,
                         withBaseConfig: baseConfig,
-                        withSurfaceTree: tree)
+                        withSurfaceTree: tree,
+                        background: background)
                 }
             }
         }
@@ -566,37 +593,55 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     /// isn't part of this tree, is already the only pane, or tabs can't be
     /// attached in the current window state.
     @discardableResult
-    func promoteSurfaceToNewTab(_ target: Ghostty.SurfaceView) -> TerminalController? {
-        guard let parentWindow = window else { return nil }
-        guard parentWindow.tabbingMode != .disallowed else { return nil }
+    func promoteSurfaceToNewTab(
+        _ target: Ghostty.SurfaceView,
+        background: Bool = false
+    ) -> TerminalController? {
+        guard canMoveSplitToNewTab(target), let parentWindow = window,
+              let detached = surfaceTree.detaching(view: target) else { return nil }
+        guard !background || !parentWindow.isMiniaturized else { return nil }
 
-        if let fullscreenStyle, fullscreenStyle.isFullscreen && !fullscreenStyle.supportsTabs {
-            return nil
-        }
-
-        undoManager?.beginUndoGrouping()
-        undoManager?.setActionName("Move Split")
-        defer {
-            undoManager?.endUndoGrouping()
-        }
-
-        guard let detachedTree = detachSurfaceToOwnTree(target) else { return nil }
-        return Self.newTab(
+        let originalTree = surfaceTree
+        let originalFocus = focusedSurface
+        let controller = Self.newTab(
             ghostty,
             from: parentWindow,
-            withSurfaceTree: detachedTree)
+            withSurfaceTree: detached.detached,
+            background: background,
+            registerUndo: false,
+            onTabCreated: {
+                let detach = { _ = self.detachSurfaceToOwnTree(target, background: background) }
+                if let manager = self.undoManager {
+                    manager.disableUndoRegistration(handler: detach)
+                } else {
+                    detach()
+                }
+            })
+        guard let controller else {
+            // The temporary destination registered ownership during init. Reassert
+            // the unchanged source's ownership if AppKit rejected the attachment.
+            surfaceTree = originalTree
+            focusedSurface = originalFocus
+            return nil
+        }
+        registerSplitPromotionUndo(controller, tree: originalTree, focus: originalFocus) { source in
+            guard let source = source as? TerminalController else { return }
+            _ = source.promoteSurfaceToNewTab(target, background: background)
+        }
+        return controller
     }
 
     @discardableResult
     override func promoteSurfaceToNewWindow(
         _ target: Ghostty.SurfaceView,
-        position: NSPoint? = nil
+        position: NSPoint? = nil,
+        background: Bool = false
     ) -> TerminalController? {
         if surfaceTree.isSplit {
-            return super.promoteSurfaceToNewWindow(target, position: position)
+            return super.promoteSurfaceToNewWindow(target, position: position, background: background)
         }
 
-        guard canPromoteSurfaceToNewWindow(target) else { return nil }
+        guard !background, canPromoteSurfaceToNewWindow(target) else { return nil }
         guard let window else { return nil }
 
         window.moveTabToNewWindow(nil)

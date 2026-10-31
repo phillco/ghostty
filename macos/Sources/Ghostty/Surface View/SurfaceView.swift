@@ -1098,6 +1098,11 @@ extension Ghostty {
                 return
             }
 
+            // A pending focus retry may outlive a pane's move into a background
+            // tab. Leave its responder alone until that window is selected.
+            if let controller = window.windowController as? BaseTerminalController,
+               !controller.focusOnAppear, !window.isKeyWindow { return }
+
             // If we had a previously focused node and its not where we're sending
             // focus, make sure that we explicitly tell it to lose focus. In theory
             // we should NOT have to do this but the focus callback isn't getting

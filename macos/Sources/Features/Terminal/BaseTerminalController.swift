@@ -40,6 +40,9 @@ class BaseTerminalController: NSWindowController,
     /// The app instance that this terminal view will represent.
     let ghostty: Ghostty.App
 
+    /// Background destinations defer initial SwiftUI focus until selected.
+    var focusOnAppear: Bool = true
+
     /// The currently focused surface.
     var focusedSurface: Ghostty.SurfaceView? {
         didSet { syncFocusToSurfaceTree() }
@@ -322,21 +325,51 @@ class BaseTerminalController: NSWindowController,
     @discardableResult
     func promoteSurfaceToNewWindow(
         _ target: Ghostty.SurfaceView,
-        position: NSPoint? = nil
+        position: NSPoint? = nil,
+        background: Bool = false
     ) -> TerminalController? {
-        undoManager?.beginUndoGrouping()
-        undoManager?.setActionName("Move Split")
-        defer {
-            undoManager?.endUndoGrouping()
-        }
+        guard surfaceTree.detaching(view: target) != nil else { return nil }
+        let originalTree = surfaceTree
+        let originalFocus = focusedSurface
+        let manager = undoManager
+        var detachedTree: SplitTree<Ghostty.SurfaceView>?
+        let detach = { detachedTree = self.detachSurfaceToOwnTree(target, background: background) }
+        if let manager { manager.disableUndoRegistration(handler: detach) } else { detach() }
+        guard let detachedTree else { return nil }
 
-        guard let detachedTree = detachSurfaceToOwnTree(target) else { return nil }
-        return TerminalController.newWindow(
+        let destination = TerminalController.newWindow(
             ghostty,
             tree: detachedTree,
             position: position,
             confirmUndo: false,
-            inheritBackgroundOpacity: isBackgroundOpaque)
+            inheritBackgroundOpacity: isBackgroundOpaque,
+            background: background,
+            registerUndo: false)
+        registerSplitPromotionUndo(destination, tree: originalTree, focus: originalFocus) { source in
+            _ = source.promoteSurfaceToNewWindow(target, position: position, background: background)
+        }
+        return destination
+    }
+
+    /// Keep a move atomic during undo and redo. Redo invokes the guarded promotion
+    /// again, so a rejected native-tab attachment cannot orphan a detached pane.
+    func registerSplitPromotionUndo(
+        _ destination: TerminalController,
+        tree: SplitTree<Ghostty.SurfaceView>,
+        focus: Ghostty.SurfaceView?,
+        redo: @escaping (BaseTerminalController) -> Void
+    ) {
+        guard let manager = undoManager else { return }
+        manager.setActionName("Move Split")
+        manager.registerUndo(withTarget: self, expiresAfter: undoExpiration) { source in
+            manager.disableUndoRegistration {
+                destination.closeTabImmediately(registerRedo: false)
+                source.surfaceTree = tree
+                source.focusedSurface = focus
+                if let focus { source.restoreSourceFocus(focus) }
+            }
+            manager.registerUndo(withTarget: source, expiresAfter: source.undoExpiration, handler: redo)
+        }
     }
 
     /// Move focus to a surface view.
@@ -871,20 +904,39 @@ class BaseTerminalController: NSWindowController,
     ///
     /// Callers are responsible for wrapping this in any desired undo grouping
     /// before creating the destination container.
-    func detachSurfaceToOwnTree(_ target: Ghostty.SurfaceView) -> SplitTree<Ghostty.SurfaceView>? {
-        guard let targetNode = surfaceTree.root?.node(view: target) else { return nil }
-        guard surfaceTree.isSplit else { return nil }
+    func detachSurfaceToOwnTree(
+        _ target: Ghostty.SurfaceView,
+        background: Bool = false
+    ) -> SplitTree<Ghostty.SurfaceView>? {
+        guard let result = surfaceTree.detaching(view: target),
+              let targetNode = surfaceTree.root?.node(view: target) else { return nil }
 
         let oldFocusedSurface = focusedSurface
         if focusedSurface == target {
             focusedSurface = findNextFocusTargetAfterClosing(node: targetNode)
         }
 
-        replaceSurfaceTree(
-            surfaceTree.removing(targetNode),
-            moveFocusFrom: oldFocusedSurface)
+        replaceSurfaceTree(result.remaining, moveFocusFrom: oldFocusedSurface)
 
-        return SplitTree<Ghostty.SurfaceView>(view: target)
+        // A background promotion leaves the source window key. Once SwiftUI has
+        // reparented the pane, hand its first responder to a surviving source pane.
+        if background, let replacement = focusedSurface { restoreSourceFocus(replacement) }
+
+        return result.detached
+    }
+
+    private func restoreSourceFocus(_ replacement: Ghostty.SurfaceView, attempt: Int = 0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (attempt == 0 ? 0 : 0.05)) { [weak self, weak replacement] in
+            guard let self, let replacement,
+                  let window = self.window, window.isKeyWindow,
+                  self.focusedSurface === replacement,
+                  self.surfaceTree.contains(replacement) else { return }
+            guard replacement.window === window else {
+                if attempt < 8 { self.restoreSourceFocus(replacement, attempt: attempt + 1) }
+                return
+            }
+            window.makeFirstResponder(replacement)
+        }
     }
 
     // MARK: TerminalViewDelegate
@@ -1275,8 +1327,13 @@ class BaseTerminalController: NSWindowController,
         // want to move focus to our focused terminal surface. This works around
         // various weirdness with moving surfaces around.
         if let window, window.firstResponder == window, let focusedSurface {
-            DispatchQueue.main.async {
-                Ghostty.moveFocus(to: focusedSurface)
+            DispatchQueue.main.async { [weak self, weak focusedSurface] in
+                guard let self, let focusedSurface,
+                      let window = self.window, window.isKeyWindow,
+                      self.focusedSurface === focusedSurface,
+                      self.surfaceTree.contains(focusedSurface) else { return }
+                self.focusOnAppear = true
+                self.restoreSourceFocus(focusedSurface)
             }
         }
 

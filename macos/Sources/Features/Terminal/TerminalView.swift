@@ -30,6 +30,9 @@ protocol TerminalViewModel: ObservableObject {
     /// and children. This should be @Published.
     var surfaceTree: SplitTree<Ghostty.SurfaceView> { get set }
 
+    /// Whether the initial view appearance should request focus.
+    var focusOnAppear: Bool { get }
+
     /// The command palette state.
     var commandPaletteIsShowing: Bool { get set }
 
@@ -85,7 +88,7 @@ struct TerminalView<ViewModel: TerminalViewModel>: View {
                         .environmentObject(ghostty)
                         .ghosttyLastFocusedSurface(lastFocusedSurface)
                         .focused($focused)
-                        .onAppear { self.focused = true }
+                        .onAppear { self.focused = viewModel.focusOnAppear }
                         .onChange(of: focusedSurface) { newValue in
                             // We want to keep track of our last focused surface so even if
                             // we lose focus we keep this set to the last non-nil value.
