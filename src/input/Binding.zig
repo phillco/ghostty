@@ -590,6 +590,22 @@ pub const Action = union(enum) {
     /// Move a tab to a new window.
     move_tab_to_new_window,
 
+    /// Move the focused split pane to a new tab and focus it. macOS only.
+    /// Does nothing when the surface is not part of a split.
+    move_split_to_new_tab,
+
+    /// Move the focused split pane to a new tab while keeping the current
+    /// tab selected. macOS only. Does nothing outside a split.
+    move_split_to_new_tab_background,
+
+    /// Move the focused split pane to a new window and focus it. macOS only.
+    /// Does nothing when the surface is not part of a split.
+    move_split_to_new_window,
+
+    /// Move the focused split pane to a new window without activating it.
+    /// macOS only. Does nothing outside a split.
+    move_split_to_new_window_background,
+
     /// Toggle the tab overview.
     ///
     /// This is only supported on Linux and when the system's libadwaita
@@ -1450,6 +1466,10 @@ pub const Action = union(enum) {
             .goto_tab,
             .move_tab,
             .move_tab_to_new_window,
+            .move_split_to_new_tab,
+            .move_split_to_new_tab_background,
+            .move_split_to_new_window,
+            .move_split_to_new_window_background,
             .toggle_tab_overview,
             .new_split,
             .goto_split,
@@ -3362,6 +3382,53 @@ test "parse: action no parameters" {
         try parseSingle("a=ignore"),
     );
     try testing.expectError(Error.InvalidFormat, parseSingle("a=ignore:A"));
+}
+
+test "parse: split promotion actions" {
+    const testing = std.testing;
+    inline for (.{
+        "move_split_to_new_tab",
+        "move_split_to_new_tab_background",
+        "move_split_to_new_window",
+        "move_split_to_new_window_background",
+    }) |name| {
+        const expected = @unionInit(Action, name, {});
+        const binding = try parseSingle("super+p=" ++ name);
+        try testing.expect(expected.equal(binding.action));
+        try testing.expectEqual(Flags{}, binding.flags);
+        try testing.expectEqual(Action.Scope.surface, binding.action.scope());
+        try testing.expect(@hasField(Action.Scoped(.surface), name));
+        try testing.expect(!@hasField(Action.Scoped(.app), name));
+
+        const performable = try parseSingle("performable:super+shift+p=" ++ name);
+        try testing.expect(expected.equal(performable.action));
+        try testing.expectEqual(Flags{ .performable = true }, performable.flags);
+        try testing.expectEqual(Trigger{
+            .key = .{ .unicode = 'p' },
+            .mods = .{ .super = true, .shift = true },
+        }, performable.trigger);
+
+        // These actions have no parameter, including no empty parameter.
+        try testing.expectError(Error.InvalidFormat, parseSingle("super+p=" ++ name ++ ":"));
+        try testing.expectError(Error.InvalidFormat, parseSingle("super+p=" ++ name ++ ":true"));
+    }
+}
+
+test "action: split promotion actions format" {
+    const testing = std.testing;
+    inline for (.{
+        "move_split_to_new_tab",
+        "move_split_to_new_tab_background",
+        "move_split_to_new_window",
+        "move_split_to_new_window_background",
+    }) |name| {
+        const action = @unionInit(Action, name, {});
+        var buf: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer buf.deinit();
+        try action.format(&buf.writer);
+        try testing.expectEqualStrings(name, buf.written());
+        try testing.expect(action.equal(try Action.parse(buf.written())));
+    }
 }
 
 test "parse: action with string" {

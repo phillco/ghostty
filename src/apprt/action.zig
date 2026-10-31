@@ -364,6 +364,18 @@ pub const Action = union(Key) {
     /// split or the window is fullscreen.
     resize_window: ResizeWindow,
 
+    /// Move a split pane to a new tab, activating the new tab. macOS only.
+    move_split_to_new_tab,
+
+    /// Move a split pane to a new tab without activating it. macOS only.
+    move_split_to_new_tab_background,
+
+    /// Move a split pane to a new window, activating it. macOS only.
+    move_split_to_new_window,
+
+    /// Move a split pane to a new window without activating it. macOS only.
+    move_split_to_new_window_background,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -436,6 +448,10 @@ pub const Action = union(Key) {
         copy_title_to_clipboard,
         move_tab_to_new_window,
         resize_window,
+        move_split_to_new_tab,
+        move_split_to_new_tab_background,
+        move_split_to_new_window,
+        move_split_to_new_window_background,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");

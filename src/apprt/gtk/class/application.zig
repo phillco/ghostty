@@ -733,6 +733,13 @@ pub const Application = extern struct {
             .move_tab => return Action.moveTab(target, value),
             .move_tab_to_new_window => return Action.moveTabToNewWindow(target),
 
+            // Split promotion currently uses the native macOS window runtime.
+            .move_split_to_new_tab,
+            .move_split_to_new_tab_background,
+            .move_split_to_new_window,
+            .move_split_to_new_window_background,
+            => return false,
+
             .new_split => return Action.newSplit(target, value),
 
             .new_tab => return Action.newTab(target, .none),

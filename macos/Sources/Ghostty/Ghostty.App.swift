@@ -623,6 +623,18 @@ extension Ghostty {
             case GHOSTTY_ACTION_MOVE_TAB_TO_NEW_WINDOW:
                 return moveTabToNewWindow(app, target: target)
 
+            case GHOSTTY_ACTION_MOVE_SPLIT_TO_NEW_TAB:
+                return moveSplit(target: target, toNewTab: true, background: false)
+
+            case GHOSTTY_ACTION_MOVE_SPLIT_TO_NEW_TAB_BACKGROUND:
+                return moveSplit(target: target, toNewTab: true, background: true)
+
+            case GHOSTTY_ACTION_MOVE_SPLIT_TO_NEW_WINDOW:
+                return moveSplit(target: target, toNewTab: false, background: false)
+
+            case GHOSTTY_ACTION_MOVE_SPLIT_TO_NEW_WINDOW_BACKGROUND:
+                return moveSplit(target: target, toNewTab: false, background: true)
+
             case GHOSTTY_ACTION_GOTO_TAB:
                 return gotoTab(app, target: target, tab: action.action.goto_tab)
 
@@ -1290,6 +1302,26 @@ extension Ghostty {
                 }
 
                 return true
+        }
+
+        private static func moveSplit(
+            target: ghostty_target_s,
+            toNewTab: Bool,
+            background: Bool
+        ) -> Bool {
+            guard target.tag == GHOSTTY_TARGET_SURFACE,
+                  let surface = target.target.surface,
+                  let surfaceView = self.surfaceView(from: surface),
+                  let controller = surfaceView.window?.windowController as? BaseTerminalController,
+                  controller.surfaceTree.isSplit,
+                  controller.surfaceTree.contains(where: { $0 === surfaceView }) else { return false }
+
+            if toNewTab {
+                guard let controller = controller as? TerminalController else { return false }
+                return controller.promoteSurfaceToNewTab(surfaceView, background: background) != nil
+            }
+
+            return controller.promoteSurfaceToNewWindow(surfaceView, background: background) != nil
         }
 
         private static func moveTabToNewWindow(

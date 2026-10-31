@@ -5559,6 +5559,16 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             {},
         ),
 
+        inline .move_split_to_new_tab,
+        .move_split_to_new_tab_background,
+        .move_split_to_new_window,
+        .move_split_to_new_window_background,
+        => |_, tag| return try self.rt_app.performAction(
+            .{ .surface = self },
+            @field(apprt.action.Action.Key, @tagName(tag)),
+            {},
+        ),
+
         .new_split => |direction| return try self.rt_app.performAction(
             .{ .surface = self },
             .new_split,
