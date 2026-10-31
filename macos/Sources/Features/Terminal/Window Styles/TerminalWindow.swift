@@ -756,6 +756,7 @@ private struct TabColorIndicatorView: View {
 // MARK: - Tab Context Menu
 
 extension TerminalWindow {
+    private static let closeTabsOnLeftMenuItemIdentifier = NSUserInterfaceItemIdentifier("com.mitchellh.ghostty.closeTabsOnTheLeftMenuItem")
     private static let closeTabsOnRightMenuItemIdentifier = NSUserInterfaceItemIdentifier("com.mitchellh.ghostty.closeTabsOnTheRightMenuItem")
     private static let changeTitleMenuItemIdentifier = NSUserInterfaceItemIdentifier("com.mitchellh.ghostty.changeTitleMenuItem")
     private static let tabColorSeparatorIdentifier = NSUserInterfaceItemIdentifier("com.mitchellh.ghostty.tabColorSeparator")
@@ -773,14 +774,29 @@ extension TerminalWindow {
             .flatMap { $0.target as? NSWindow }
             .flatMap { $0.windowController as? TerminalController }
 
-        // Close tabs to the right
-        let item = NSMenuItem(title: "Close Tabs to the Right", action: #selector(TerminalController.closeTabsOnTheRight(_:)), keyEquivalent: "")
-        item.identifier = Self.closeTabsOnRightMenuItemIdentifier
-        item.target = targetController
-        item.setImageIfDesired(systemSymbolName: "xmark")
-        if menu.insertItem(item, after: NSSelectorFromString("performCloseOtherTabs:")) == nil,
-           menu.insertItem(item, after: NSSelectorFromString("performClose:")) == nil {
-            menu.addItem(item)
+        // Close tabs to the left/right
+        let closeTabsOnTheLeft = NSMenuItem(title: "Close Tabs to the Left", action: #selector(TerminalController.closeTabsOnTheLeft(_:)), keyEquivalent: "")
+        closeTabsOnTheLeft.identifier = Self.closeTabsOnLeftMenuItemIdentifier
+        closeTabsOnTheLeft.target = targetController
+        closeTabsOnTheLeft.setImageIfDesired(systemSymbolName: "xmark")
+
+        let closeTabsOnTheRight = NSMenuItem(title: "Close Tabs to the Right", action: #selector(TerminalController.closeTabsOnTheRight(_:)), keyEquivalent: "")
+        closeTabsOnTheRight.identifier = Self.closeTabsOnRightMenuItemIdentifier
+        closeTabsOnTheRight.target = targetController
+        closeTabsOnTheRight.setImageIfDesired(systemSymbolName: "xmark")
+
+        let insertedLeft = menu.insertItem(closeTabsOnTheLeft, after: NSSelectorFromString("performCloseOtherTabs:")) != nil
+        let insertedRight = menu.insertItem(closeTabsOnTheRight, after: #selector(TerminalController.closeTabsOnTheLeft(_:))) != nil
+
+        if !insertedLeft,
+           menu.insertItem(closeTabsOnTheLeft, after: NSSelectorFromString("performClose:")) == nil {
+            menu.addItem(closeTabsOnTheLeft)
+        }
+
+        if !insertedRight,
+           menu.insertItem(closeTabsOnTheRight, after: #selector(TerminalController.closeTabsOnTheLeft(_:))) == nil,
+           menu.insertItem(closeTabsOnTheRight, after: NSSelectorFromString("performClose:")) == nil {
+            menu.addItem(closeTabsOnTheRight)
         }
 
         // Other close items should have the xmark to match Safari on macOS 26

@@ -895,6 +895,46 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
     }
 
+    private func closeTabsOnTheLeftImmediately() {
+        guard let window = window else { return }
+        guard let tabGroup = window.tabGroup else { return }
+        guard let currentIndex = tabGroup.windows.firstIndex(of: window) else { return }
+
+        let tabsToClose = tabGroup.windows.enumerated().filter { $0.offset < currentIndex }
+        guard !tabsToClose.isEmpty else { return }
+
+        undoManager?.beginUndoGrouping()
+        defer {
+            undoManager?.endUndoGrouping()
+        }
+
+        for (_, candidate) in tabsToClose {
+            if let controller = candidate.windowController as? TerminalController {
+                controller.closeTabImmediately(registerRedo: false)
+            }
+        }
+
+        if let undoManager {
+            undoManager.setActionName("Close Tabs to the Left")
+
+            undoManager.registerUndo(
+                withTarget: self,
+                expiresAfter: undoExpiration
+            ) { target in
+                DispatchQueue.main.async {
+                    target.window?.makeKeyAndOrderFront(nil)
+                }
+
+                undoManager.registerUndo(
+                    withTarget: target,
+                    expiresAfter: target.undoExpiration
+                ) { target in
+                    target.closeTabsOnTheLeftImmediately()
+                }
+            }
+        }
+    }
+
     /// Closes the current window (including any other tabs) immediately and without
     /// confirmation. This will setup proper undo state so the action can be undone.
     func closeWindowImmediately() {
@@ -1454,6 +1494,35 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
     }
 
+    @IBAction func closeTabsOnTheLeft(_ sender: Any?) {
+        guard let window = window else { return }
+        guard let tabGroup = window.tabGroup else { return }
+        guard let currentIndex = tabGroup.windows.firstIndex(of: window) else { return }
+
+        let tabsToClose = tabGroup.windows.enumerated().filter { $0.offset < currentIndex }
+        guard !tabsToClose.isEmpty else { return }
+
+        let needsConfirm = tabsToClose.contains { (_, candidate) in
+            guard let controller = candidate.windowController as? TerminalController else {
+                return false
+            }
+
+            return controller.surfaceTree.contains(where: { $0.needsConfirmQuit })
+        }
+
+        if !needsConfirm {
+            self.closeTabsOnTheLeftImmediately()
+            return
+        }
+
+        confirmClose(
+            messageText: "Close Tabs on the Left?",
+            informativeText: "At least one tab to the left still has a running process. If you close the tab the process will be killed."
+        ) {
+            self.closeTabsOnTheLeftImmediately()
+        }
+    }
+
     @IBAction func returnToDefaultSize(_ sender: Any?) {
         guard let window, let defaultSize else { return }
         defaultSize.apply(to: window)
@@ -1832,6 +1901,11 @@ extension TerminalController {
 
     override func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
+        case #selector(closeTabsOnTheLeft):
+            guard let window, let tabGroup = window.tabGroup else { return false }
+            guard let currentIndex = tabGroup.windows.firstIndex(of: window) else { return false }
+            return tabGroup.windows.indices.contains { $0 < currentIndex }
+
         case #selector(closeTabsOnTheRight):
             guard let window, let tabGroup = window.tabGroup else { return false }
             guard let currentIndex = tabGroup.windows.firstIndex(of: window) else { return false }
