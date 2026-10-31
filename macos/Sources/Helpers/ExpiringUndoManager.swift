@@ -1,3 +1,5 @@
+import Foundation
+
 /// An UndoManager subclass that supports registering undo operations that automatically expire after a specified duration.
 ///
 /// This class extends the standard UndoManager to add time-based expiration for undo operations.
@@ -47,6 +49,35 @@ class ExpiringUndoManager: UndoManager {
             self?.expiringTargets.remove(expiringTarget)
             guard let target = expiringTarget.target as? TargetType else { return }
             handler(target)
+        }
+    }
+
+    /// Registers paired mutations that must run after the current event-loop turn.
+    /// Register the inverse before scheduling either mutation, while UndoManager
+    /// still knows whether it is undoing or redoing. Deferred mutations cannot
+    /// register their own actions or clear the remaining redo history.
+    /// The scheduler must preserve FIFO order when undo and redo are invoked fast.
+    func registerDeferredUndo<TargetType: AnyObject>(
+        withTarget target: TargetType,
+        expiresAfter duration: Duration,
+        undo: @escaping (TargetType) -> Void,
+        redo: @escaping (TargetType) -> Void,
+        schedule: @escaping (@escaping () -> Void) -> Void = { work in
+            DispatchQueue.main.async(execute: DispatchWorkItem(block: work))
+        }
+    ) {
+        registerUndo(withTarget: target, expiresAfter: duration) { [weak self] target in
+            guard let self else { return }
+            self.registerDeferredUndo(
+                withTarget: target,
+                expiresAfter: duration,
+                undo: redo,
+                redo: undo,
+                schedule: schedule)
+            schedule { [weak self, weak target] in
+                guard let self, let target else { return }
+                self.disableUndoRegistration { undo(target) }
+            }
         }
     }
 

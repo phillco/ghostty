@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run focused fork Swift tests without launching Ghostty or posting input.
 
-This compiles real split-tree, tab-color, and NSEvent extension sources in a
+This compiles real split-tree, tab-color, NSEvent, and deferred-undo sources in a
 temporary Swift package. It does not replace a full app compile or verify native
 window, focus, AppleScript command routing, or rendering behavior. ghosttyMods is
 extracted unchanged from production into a minimal Ghostty namespace; the other
@@ -86,11 +86,15 @@ def prepare_package(repo: Path, package: Path) -> None:
         "macos/Sources/Helpers/Extensions/Array+Extension.swift",
         "macos/Sources/Features/Terminal/TerminalTabColor.swift",
         "macos/Sources/Ghostty/NSEvent+Extension.swift",
+        "macos/Sources/Helpers/ExpiringUndoManager.swift",
+        "macos/Sources/Helpers/Extensions/UndoManager+Extension.swift",
+        "macos/Sources/Helpers/Extensions/Duration+Extension.swift",
     )
     tests = (
         "macos/Tests/Splits/SplitTreeTests.swift",
         "macos/Tests/Terminal/TerminalTabColorTests.swift",
         "macos/Tests/Ghostty/NSEventViewportTests.swift",
+        "macos/Tests/Helpers/ExpiringUndoManagerTests.swift",
     )
     for relative in (
         *sources,
