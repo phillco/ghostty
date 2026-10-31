@@ -41,9 +41,9 @@ Shared caches and the global Xcode selection are not changed. The guard and stag
 logs remain in that workspace.
 
 ```sh
-ZIG=/path/to/zig-0.17.0/zig just build-core -Dxcframework-target=native
-/path/to/zig-0.17.0/zig build test-lib-vt -Dtest-filter='StringMap accessibility ranges'
-/path/to/zig-0.17.0/zig build test -Demit-macos-app=false -Demit-xcframework=false \
+just build-core -Dxcframework-target=native
+zig build test-lib-vt -Dtest-filter='StringMap accessibility ranges'
+zig build test -Demit-macos-app=false -Demit-xcframework=false \
   -Dtest-filter=input.Binding -Dtest-filter=apprt.action \
   -Dtest-filter='scroll-to-bottom paste defaults' \
   -Dtest-filter='embedded key event preserves viewport' \
@@ -81,6 +81,36 @@ live configuration edits, or interactive desktop checks are part of this run.
 The inherited AX frame helper counts UTF-16 units as display columns. Core Unicode
 selection tests do not establish correct on-screen bounds for wide/grapheme cells.
 That remains an explicit UI acceptance limit.
+
+## Recorded results (2026-10-31)
+
+Validated source revision: `ecb85f9f43cca90c4eb3`. The laptop's ordinary zsh and Fish
+`zig` commands now resolve Homebrew Zig 0.17.0; `ZIG` overrides remain optional.
+
+| Check | Result |
+| --- | --- |
+| Pure upstream native core and unsigned app baseline | Passed before replay |
+| AX replay native core | Passed |
+| Final native core | 260/260 build steps passed |
+| Focused Zig binding, ABI, command, config and event suites | 184/184 tests passed |
+| VT accessibility mapping suite, including shared supporting tests | 73/73 tests passed |
+| Hostless Swift split, color/dictionary, NSEvent and undo suites | 75/75 tests passed across five suites |
+| Final unsigned arm64 Debug app compile | Passed; application not executed |
+| SwiftLint, Zig formatting, C header syntax, dictionary XML, Python Ruff | Passed |
+
+The selected modern Xcode lacked Metal tools. The core and Zig tests used an
+already-installed Xcode 16.4 / SDK 15.5 through per-process `DEVELOPER_DIR`; app and
+hostless Swift compilation used the selected modern Xcode. Global Xcode selection
+was not changed. Temporary app LaunchServices registrations were removed explicitly.
+
+The standalone tests exposed an inherited expiry-record cleanup exclusivity crash.
+The fix retains expiry records until collection mutation finishes and makes expiry
+callbacks idempotent. A regression test clears redo history and reuses the manager.
+The suite also verifies repeated undo/redo keeps the remaining redo history and
+executes deferred mutations in FIFO order without registering duplicate inverses.
+
+Stage logs, source manifests and cache/disk telemetry are under
+`~/src/buildbox/ghostty-rebase-20261031/logs` on the mini. No app-host/UI tests were run.
 
 ## Native acceptance when authorized
 
