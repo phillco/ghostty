@@ -2,8 +2,8 @@ set shell := ["zsh", "-lc"]
 
 zig := env_var_or_default("ZIG", "zig")
 
-app_bundle := "zig-out/Ghostty.app"
-install_app := env_var_or_default("GHOSTTY_INSTALL_APP", home_directory() + "/Applications/Ghostty.app")
+app_bundle := "zig-out/Ghostty Phil.app"
+install_app := env_var_or_default("GHOSTTY_INSTALL_APP", home_directory() + "/Applications/Ghostty Phil.app")
 
 default:
     @just --list
@@ -26,12 +26,12 @@ build *args:
 install:
     if [ "$(uname -s)" = "Darwin" ]; then \
         just macos-build; \
-        if [ -d "macos/build/Debug/Ghostty.app" ]; then \
-            app="macos/build/Debug/Ghostty.app"; \
-        elif [ -d "macos/macos/build/Debug/Ghostty.app" ]; then \
-            app="macos/macos/build/Debug/Ghostty.app"; \
+        if [ -d "macos/build/Debug/Ghostty Phil.app" ]; then \
+            app="macos/build/Debug/Ghostty Phil.app"; \
+        elif [ -d "macos/macos/build/Debug/Ghostty Phil.app" ]; then \
+            app="macos/macos/build/Debug/Ghostty Phil.app"; \
         else \
-            echo "Ghostty.app not found for Debug build" >&2; \
+            echo "Ghostty Phil.app not found for Debug build" >&2; \
             exit 1; \
         fi; \
         mkdir -p "$(dirname '{{install_app}}')"; \
@@ -112,12 +112,12 @@ macos-test configuration="Debug" scheme="Ghostty":
 
 macos-run configuration="Debug":
     app=""
-    if [ -d "macos/build/{{configuration}}/Ghostty.app" ]; then \
-        app="macos/build/{{configuration}}/Ghostty.app"; \
-    elif [ -d "macos/macos/build/{{configuration}}/Ghostty.app" ]; then \
-        app="macos/macos/build/{{configuration}}/Ghostty.app"; \
+    if [ -d "macos/build/{{configuration}}/Ghostty Phil.app" ]; then \
+        app="macos/build/{{configuration}}/Ghostty Phil.app"; \
+    elif [ -d "macos/macos/build/{{configuration}}/Ghostty Phil.app" ]; then \
+        app="macos/macos/build/{{configuration}}/Ghostty Phil.app"; \
     else \
-        echo "Ghostty.app not found for configuration {{configuration}}" >&2; \
+        echo "Ghostty Phil.app not found for configuration {{configuration}}" >&2; \
         exit 1; \
     fi; \
     open -g "$app"
