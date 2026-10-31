@@ -148,14 +148,13 @@ struct ExpiringUndoManagerTests {
         manager.groupsByEvent = false
         let state = State()
         let queue = MutationQueue()
-        manager.beginUndoGrouping()
+        // Do not create a Foundation empty group: it can itself report canUndo.
         manager.registerDeferredUndo(
             withTarget: state,
             expiresAfter: .zero,
             undo: { $0.applied.append("undo") },
             redo: { $0.applied.append("redo") },
             schedule: queue.schedule)
-        manager.endUndoGrouping()
 
         #expect(!manager.canUndo)
         #expect(queue.pending.isEmpty)
