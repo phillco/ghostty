@@ -121,6 +121,28 @@ struct ExpiringUndoManagerTests {
         #expect(!manager.canRedo)
     }
 
+    @Test func clearingHistoryReleasesExpiryRecordsWithoutReentrantMutation() {
+        let manager = ExpiringUndoManager()
+        manager.groupsByEvent = false
+        let state = State()
+        let queue = MutationQueue()
+        registerPromotion("promotion", manager: manager, state: state, queue: queue)
+        manager.undo()
+        queue.drain()
+        #expect(manager.canRedo)
+
+        manager.removeAllActions()
+        #expect(!manager.canUndo)
+        #expect(!manager.canRedo)
+        #expect(queue.pending.isEmpty)
+
+        registerPromotion("next", manager: manager, state: state, queue: queue)
+        manager.undo()
+        queue.drain()
+        #expect(state.applied.isEmpty)
+        manager.removeAllActions()
+    }
+
     @Test func zeroExpirationDoesNotRegisterOrSchedule() {
         let manager = ExpiringUndoManager()
         manager.groupsByEvent = false

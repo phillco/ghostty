@@ -56,12 +56,14 @@ sources without a Ghostty app host. It copies tests into a temporary Swift packa
 uses the actual C header, and extracts the unchanged production modifier conversion
 into a minimal namespace. This validates those source components, not the complete
 AppKit application. Compile the app separately using `macos/build.nu` or the
-matching clean-environment Xcode invocation, with
-`REGISTER_APP_WITH_LAUNCH_SERVICES=NO` for validation builds.
+matching clean-environment Xcode invocation. Xcode still registered these temporary
+app bundles despite `REGISTER_APP_WITH_LAUNCH_SERVICES=NO`; validation explicitly
+unregistered only those bundle paths afterward. Do not rely on that setting to
+prevent registration.
 
 **Do not run `macos/build.nu --action test` or `xcodebuild test` during active use.**
 The regular GhosttyTests target launches Ghostty via TEST_HOST even when
-GhosttyUITests is skipped. No app-host tests, installation, application launch,
+GhosttyUITests is skipped. No app-host tests, installation, GUI application launch,
 live configuration edits, or interactive desktop checks are part of this run.
 
 | Preserved feature | Automated evidence | Native acceptance still needed |

@@ -97,7 +97,7 @@ macos-build configuration="Debug" scheme="Ghostty":
         -project macos/Ghostty.xcodeproj \
         -scheme {{scheme}} \
         -configuration {{configuration}} \
-        "SYMROOT=build" REGISTER_APP_WITH_LAUNCH_SERVICES=NO \
+        "SYMROOT=build" \
         build
 
 macos-test configuration="Debug" scheme="Ghostty":
