@@ -1,0 +1,344 @@
+{
+  "schema_version": 1,
+  "compiled_source_revision": "d8a71976737d18adbf3239b457f02a4dbe2002e3",
+  "source_manifest": {
+    "captured_utc": "2026-10-31T16:27:42.975304+00:00",
+    "head": "d8a71976737d18adbf3239b457f02a4dbe2002e3",
+    "status": "?? .claude/\n",
+    "source_sha256": "7245e25db587c0888b1901d8fb942b9046bb2098a7920205b8079ef4279f7af6",
+    "files": 5941,
+    "capture_method": "tracked-files",
+    "excludes": [
+      ".git",
+      ".zig-cache",
+      "zig-out",
+      "macos/build",
+      "macos/GhosttyKit.xcframework",
+      "zig-pkg",
+      ".claude"
+    ]
+  },
+  "artifact": {
+    "path": "~/src/buildbox/ghostty-rebase-20261031/output/Ghostty-Phil-d8a71976-arm64-nocoverage-unsigned.zip",
+    "sha256": "ff0975d02bfc0a817b5214b58d1dc10f3c0c52b188153a99415ec5e212c3871c",
+    "bytes": 25628229,
+    "signed": false,
+    "application_executed": false
+  },
+  "inspection": {
+    "app": "~/src/buildbox/ghostty-rebase-20261031/output/products/ReleaseLocal/Ghostty Phil.app",
+    "main_bundle": {
+      "CFBundleIdentifier": "io.phillip.ghostty-phil",
+      "CFBundleName": "Ghostty Phil",
+      "CFBundleDisplayName": "Ghostty Phil",
+      "CFBundleExecutable": "ghostty",
+      "CFBundleShortVersionString": "0.1",
+      "CFBundleVersion": "1",
+      "GhosttyCommit": "",
+      "GhosttyPhilSourceRevision": null
+    },
+    "architecture": "arm64",
+    "plugin_bundle_identifier": "io.phillip.ghostty-phil.dock-tile",
+    "plugin_architecture": "arm64",
+    "sdef_title": "Ghostty Phil Scripting Dictionary",
+    "swift_module": "Ghostty",
+    "symlinks": [
+      {
+        "path": "Contents/Frameworks/Sparkle.framework/Resources",
+        "target": "Versions/Current/Resources",
+        "resolved_relative": "Contents/Frameworks/Sparkle.framework/Versions/B/Resources"
+      },
+      {
+        "path": "Contents/Frameworks/Sparkle.framework/Updater.app",
+        "target": "Versions/Current/Updater.app",
+        "resolved_relative": "Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
+      },
+      {
+        "path": "Contents/Frameworks/Sparkle.framework/XPCServices",
+        "target": "Versions/Current/XPCServices",
+        "resolved_relative": "Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
+      },
+      {
+        "path": "Contents/Frameworks/Sparkle.framework/Autoupdate",
+        "target": "Versions/Current/Autoupdate",
+        "resolved_relative": "Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+      },
+      {
+        "path": "Contents/Frameworks/Sparkle.framework/Sparkle",
+        "target": "Versions/Current/Sparkle",
+        "resolved_relative": "Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle"
+      },
+      {
+        "path": "Contents/Frameworks/Sparkle.framework/Versions/Current",
+        "target": "B",
+        "resolved_relative": "Contents/Frameworks/Sparkle.framework/Versions/B"
+      }
+    ],
+    "resource_file_counts": {
+      "terminfo": 4,
+      "ghostty/themes": 819,
+      "ghostty/shell-integration": 7,
+      "locale": 34,
+      "fish": 1,
+      "zsh": 1,
+      "bash-completion": 1,
+      "nvim": 4,
+      "man": 2
+    },
+    "resource_font_files": [],
+    "embedded_font_payloads": [
+      {
+        "name": "JetBrainsMono-Regular.ttf",
+        "bytes": 273900,
+        "sha256": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f",
+        "present_in": [
+          "Contents/MacOS/ghostty"
+        ]
+      },
+      {
+        "name": "JetBrainsMono[wght].ttf",
+        "bytes": 303144,
+        "sha256": "662a196d58f1183bf2d77428b6d5283fe3f45161ab021bea4036bc98e5cac016",
+        "present_in": [
+          "Contents/MacOS/ghostty"
+        ]
+      },
+      {
+        "name": "SymbolsNerdFont-Regular.ttf",
+        "bytes": 2440316,
+        "sha256": "71db104aa66567d0efe0b98758f9dfc1895573a453fe85fb53d1c38544a55106",
+        "present_in": [
+          "Contents/MacOS/ghostty"
+        ]
+      }
+    ],
+    "errors": []
+  },
+  "remote_build": {
+    "host": "bedroom-mini",
+    "zig_version": "0.17.0",
+    "xcode_version": "27.2 (27B52)",
+    "sdk_version": "27.2",
+    "metal_toolchain": "27B47",
+    "core": {
+      "configuration": "ReleaseFast",
+      "steps_passed": 257,
+      "steps_total": 257
+    },
+    "application": {
+      "configuration": "ReleaseLocal",
+      "architecture": "arm64",
+      "result": "passed"
+    },
+    "tests": {
+      "focused_zig": {
+        "steps_passed": 104,
+        "steps_total": 104,
+        "tests_passed": 187,
+        "tests_total": 187
+      },
+      "hostless_swift": {
+        "tests_passed": 79,
+        "suites_passed": 6
+      }
+    },
+    "stage_exits": {
+      "core": 0,
+      "metal": 0,
+      "focused": 0,
+      "swift": 0,
+      "app": 0,
+      "package": 0
+    },
+    "guard": {
+      "cache_cap_bytes": 6442450944,
+      "free_reserve_bytes": 8589934592,
+      "sample_seconds": 5,
+      "cache_scope": "runtime/cache: Zig global/local plus Clang and Swift module caches; dependency source packages and Xcode DerivedData are covered by free-space reserve",
+      "observed_cache_min_bytes": 2784305152,
+      "observed_cache_max_bytes": 4433199104,
+      "final_cache_bytes": 4386353152,
+      "observed_free_min_bytes": 101928574976,
+      "observed_free_max_bytes": 111977455616,
+      "final_sample_free_bytes": 101928574976,
+      "current_free_bytes": 99561816064,
+      "breaches": [],
+      "builtin_zig_disk_cache_cap": false
+    },
+    "workspace_allocated_kib": 7783168,
+    "launchservices_cleanup": {
+      "remaining": [],
+      "removed": [],
+      "utc": "2026-10-31T16:51:22.615986+00:00"
+    },
+    "full_report": "bedroom-mini:~/src/buildbox/ghostty-rebase-20261031/logs/phil-nocoverage-artifact-report.json",
+    "local_logs": "/tmp/ghostty-phil-nocoverage-validation-logs",
+    "app_host_tests_run": false,
+    "gui_launched": false,
+    "coverage_audit": {
+      "variant": "phil-release-nocoverage",
+      "source_revision": "d8a71976737d18adbf3239b457f02a4dbe2002e3",
+      "source_sha256": "7245e25db587c0888b1901d8fb942b9046bb2098a7920205b8079ef4279f7af6",
+      "build_command": [
+        "/usr/bin/xcodebuild",
+        "-project",
+        "~/src/buildbox/ghostty-rebase-20261031/source/macos/Ghostty.xcodeproj",
+        "-scheme",
+        "Ghostty",
+        "-configuration",
+        "ReleaseLocal",
+        "-destination",
+        "generic/platform=macOS",
+        "-derivedDataPath",
+        "~/src/buildbox/ghostty-rebase-20261031/runtime/app-derived-data",
+        "SYMROOT=~/src/buildbox/ghostty-rebase-20261031/output/products",
+        "ARCHS=arm64",
+        "ONLY_ACTIVE_ARCH=YES",
+        "CODE_SIGNING_ALLOWED=NO",
+        "REGISTER_APP_WITH_LAUNCH_SERVICES=NO",
+        "CLANG_ENABLE_CODE_COVERAGE=NO",
+        "ENABLE_CODE_COVERAGE=NO",
+        "CLANG_COVERAGE_MAPPING=NO",
+        "-jobs",
+        "4",
+        "build"
+      ],
+      "profiling_flag_matches": [],
+      "active_response_files": {
+        "runtime/app-derived-data/Build/Intermediates.noindex/Ghostty.build/ReleaseLocal/Ghostty.build/Objects-normal/arm64/e6072d4f65d7061329687fe24e3d63a7-common-args.resp": {
+          "profiling_flags": []
+        }
+      },
+      "swift_compiler_command_count": 7,
+      "linker_command_count": 6,
+      "macho_profile_or_coverage_sections": {
+        "Contents/MacOS/ghostty": [],
+        "Contents/PlugIns/DockTilePlugin.plugin/Contents/MacOS/DockTilePlugin": []
+      },
+      "errors": []
+    }
+  },
+  "local_installation": {
+    "source_revision": "d8a71976737d18adbf3239b457f02a4dbe2002e3",
+    "archive_sha256": "ff0975d02bfc0a817b5214b58d1dc10f3c0c52b188153a99415ec5e212c3871c",
+    "relocatable_symlinks": 6,
+    "installed_at": "2026-10-31T16:51:35.746563+00:00",
+    "destination": "~/Applications/Ghostty Phil.app",
+    "bundle_id": "io.phillip.ghostty-phil",
+    "bundle_version": "1.4.1-dev",
+    "version_output": "Ghostty 1.4.1-dev+0000000\n\nVersion\n  - version: 1.4.1-dev+0000000\n  - channel: tip\nBuild Config\n  - Zig version   : 0.17.0\n  - build mode    : .fast\n  - app runtime   : .none\n  - font engine   : .coretext\n  - renderer      : renderer.generic.Renderer(renderer.Metal)\n  - libxev        : kqueue\n",
+    "promotion_bindings": [
+      "keybind = super+shift+p=move_split_to_new_tab",
+      "keybind = super+p=move_split_to_new_tab_background"
+    ],
+    "signing_identity": "Developer ID Application: Phillip Cohen (45XPWL4B2Z)",
+    "coverage_profile_files_created": 0,
+    "replaced_task_install": true,
+    "gui_launched": false,
+    "result": "passed",
+    "signed_binary_sha256": "9261bd662e6c98e80e85afa54fc759506ca51091a7bd25238577a9d9d45064ac",
+    "cdhash": "8b8dbb3d72ae249e663ff7977c86ccdc9176df9d",
+    "hardened_runtime": true,
+    "signature_verification": "codesign --verify --deep --strict --verbose=2",
+    "entitlements": "macos/GhosttyReleaseLocal.entitlements",
+    "checks": [
+      {
+        "arguments": [
+          "+version"
+        ],
+        "exit": 0
+      },
+      {
+        "arguments": [
+          "+validate-config",
+          "--config-file=~/src/ports/ghostty/test/fork/promotion.conf"
+        ],
+        "exit": 0
+      },
+      {
+        "arguments": [
+          "+list-actions"
+        ],
+        "exit": 0
+      },
+      {
+        "arguments": [
+          "+list-keybinds",
+          "--default",
+          "--plain"
+        ],
+        "exit": 0
+      }
+    ],
+    "launchservices_registered": true,
+    "stock_application_replaced_or_restarted": false,
+    "live_configuration_modified_or_reloaded": false,
+    "native_ui_acceptance": "pending"
+  },
+  "talon_companion": {
+    "repository": "~/.talon/user",
+    "commits": {
+      "distinct_reload": "ab23a7174b2706beb1271bbb255cb119a8707eb9",
+      "bundle_recognition_and_routing": "c80f35cd5b6a4f545f8706f26450b3680c5fd4e1"
+    },
+    "command": "ghostty phil reload [config]",
+    "menu_path": "Ghostty Phil|Reload Configuration",
+    "bundle_id": "io.phillip.ghostty-phil",
+    "debug_bundle_id": "io.phillip.ghostty-phil.debug",
+    "recognition_scope": [
+      "Ghostty terminal/shell tags",
+      "native terminal backend",
+      "Claude/Codex app contexts",
+      "tmux controls",
+      "AX dictation/navigation",
+      "clipboard capability guards"
+    ],
+    "routing": [
+      "Contextual reload selects active supported bundle",
+      "Native new window selects active supported bundle, then deterministic running bundle, then existing stock fallback"
+    ],
+    "static_checks": [
+      "Ruff lint on changed Python files",
+      "Talon static validation",
+      "talonfmt grammar parsing",
+      "jj-diff-check"
+    ],
+    "tests": {
+      "working_identity_routing_passed": 7,
+      "working_clipboard_passed": 9,
+      "committed_identity_routing_passed": 6,
+      "committed_identity_routing_skipped": 1
+    },
+    "working_copy_only_additions": {
+      "file": "_phil-private/integrations/ghostty/ghostty_clipboard.py",
+      "location": "NativePromptClipboard.refresh capability allowlist, lines 123-124",
+      "added_bundle_ids": [
+        "io.phillip.ghostty-phil",
+        "io.phillip.ghostty-phil.debug"
+      ],
+      "reason": "The enclosing implementation is pre-existing unrelated work in progress; only these two ID additions are ours.",
+      "patch": "/tmp/ghostty-phil-clipboard-ids.patch",
+      "patch_sha256": "f7026a8580f0c7ae6ae38d89080ef9df5ceb5d2d6475964a080b1ba22c3e60c9"
+    },
+    "unrelated_work_preserved": true,
+    "reload_or_ui_actions_executed": false,
+    "native_voice_acceptance": "pending",
+    "validation_commands": [
+      "python3 _phil-private/tests/test_ghostty_phil_identity.py",
+      "python3 _phil-private/tests/test_ghostty_prompt_clipboard.py",
+      "ruff check <14 touched Python sources and new identity test>",
+      "talon-validate --static-only <same 15 Python files>",
+      "talonfmt _phil-private/integrations/ghostty/ghostty-both.talon",
+      "talonfmt _phil-private/integrations/ghostty/ghostty-phil-global.talon",
+      "jj-diff-check"
+    ],
+    "validation_scope": "Current working source, preserving pre-existing dirty implementations; committed identity source separately tested with one expected skip.",
+    "formatting_check": {
+      "passed_files": 14,
+      "total_files": 15,
+      "untouched_exception": "Existing ghostty.py tab-next multiline call formatting"
+    },
+    "committed_source_lint_caveat": "Inherited chrome_ax.py E101 mixed indentation near line 296; the pre-existing dirty working source already fixes it. Current working-source Ruff lint passed.",
+    "passive_log_evidence": "Talon file-watch load events observed for the new global grammar and modified native backend; no action invocation or native behavior validation."
+  }
+}

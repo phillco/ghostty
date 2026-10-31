@@ -78,8 +78,10 @@ prevent registration.
 
 **Do not run `macos/build.nu --action test` or `xcodebuild test` during active use.**
 The regular GhosttyTests target launches Ghostty via TEST_HOST even when
-GhosttyUITests is skipped. No app-host tests, installation, GUI application launch,
-live configuration edits, or interactive desktop checks are part of this run.
+GhosttyUITests is skipped. The original rebase validation did not include
+installation. The later authorized Ghostty Phil installation is recorded below;
+neither run used app-host tests, a GUI application launch, live configuration
+edits, or interactive desktop checks.
 
 | Preserved feature | Automated evidence | Native acceptance still needed |
 | --- | --- | --- |
@@ -132,6 +134,58 @@ The dedicated Zig cache peaked at 2.64 GiB and finished at 2.59 GiB, below its
 
 Stage logs, source manifests and cache/disk telemetry are under
 `~/src/buildbox/ghostty-rebase-20261031/logs` on the mini. No app-host/UI tests were run.
+
+## Ghostty Phil build and installation (2026-10-31)
+
+Compiled source: `d8a71976737d18adbf3239b457f02a4dbe2002e3`. Later packaging and
+validation-documentation commits do not change the compiled sources. The mini
+built the native core in ReleaseFast and the arm64 app in ReleaseLocal.
+
+| Check | Result |
+| --- | --- |
+| Optimized native core | 257/257 steps passed |
+| Focused Zig suites, including macOS identity and translation paths | 187/187 tests passed |
+| Hostless Swift suites, including source-close restoration undo | 79/79 tests passed across six suites |
+| ReleaseLocal arm64 application compile | Passed |
+| Bundle identity, resources and relocation | Passed; six internal relative symlinks |
+| Developer ID signing and installed deep/strict signature verification | Passed |
+| Installed CLI version, explicit promotion config validation, action list and default bindings | Passed |
+| Coverage disabled in app/plugin and no profiling output from installed CLI | Passed |
+
+Installed at `~/Applications/Ghostty Phil.app`, bundle ID
+`io.phillip.ghostty-phil`, signed with Developer ID Application: Phillip Cohen
+(`45XPWL4B2Z`). Before signing, bundle metadata was stamped with version
+`1.4.1-dev` and the full compiled-source revision. The core CLI version retains
+`1.4.1-dev+0000000` because the tracked-file build snapshot has no Git directory;
+the source manifest and bundle revision identify the build precisely.
+
+The release packaging invocation explicitly sets `ENABLE_CODE_COVERAGE=NO`,
+`CLANG_COVERAGE_MAPPING=NO` and `CLANG_ENABLE_CODE_COVERAGE=NO`. Without these
+overrides the scheme build enabled profiling even for ReleaseLocal. The final
+compile/link arguments and Mach-O sections contain no coverage instrumentation;
+installed CLI checks also confirmed that no LLVM profile file is written.
+
+The mini's previously available Xcode paths changed externally during this run.
+Final successful compilation used Xcode 27.2 / SDK 27.2 and Apple's Metal Toolchain
+27B47, provisioned as build tooling. Global Xcode selection was not changed.
+Temporary build-app LaunchServices registrations were removed. Only the signed,
+installed local fork was registered for normal application discovery.
+
+The installed CLI checks exit before `NSApplicationMain`. The GUI was not launched,
+the existing Ghostty application was not replaced or restarted, and the shared
+configuration was not modified or reloaded. Native focus, rendering and repeated
+undo/redo acceptance remain outstanding, including the source-close sequence below.
+
+Companion Talon configuration adds `ghostty phil reload [config]`, targeting
+`Ghostty Phil|Reload Configuration` in `io.phillip.ghostty-phil`. Fork release/debug
+IDs are also recognized by terminal contexts and native routing. Existing global
+stock reload commands retain their targets. These integration changes received
+offline identity/routing and clipboard checks; no reload or other UI action was
+invoked. Companion-repository revisions and the narrow edit retained with existing
+Talon work in progress are listed in the installation receipt.
+
+Artifact provenance, remote cache/disk telemetry and local installation checks are
+recorded in [ghostty-phil-install-20261031.json](ghostty-phil-install-20261031.json).
 
 ## Native acceptance when authorized
 
