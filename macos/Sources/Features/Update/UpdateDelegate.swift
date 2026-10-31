@@ -3,7 +3,8 @@ import Cocoa
 
 extension UpdateDriver: SPUUpdaterDelegate {
     func feedURLString(for updater: SPUUpdater) -> String? {
-        guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else {
+        guard UpdateController.isSupported,
+              let appDelegate = NSApplication.shared.delegate as? AppDelegate else {
             return nil
         }
 

@@ -9,6 +9,9 @@ import SwiftUI
 /// for managing updates with Ghostty's custom driver and delegate. It handles
 /// initialization, starting the updater, and provides the check for updates action.
 class UpdateController {
+    /// Official updates replace the fork. Enable only after providing a fork-specific feed.
+    static let isSupported = false
+
     private(set) var updater: SPUUpdater
     private let userDriver: UpdateDriver
 
@@ -40,6 +43,7 @@ class UpdateController {
     /// This must be called before the updater can check for updates. If starting fails,
     /// the error will be shown to the user.
     func startUpdater() {
+        guard Self.isSupported else { return }
         do {
             try updater.start()
         } catch {
@@ -60,6 +64,7 @@ class UpdateController {
     ///
     /// This is typically connected to a menu item action.
     func checkForUpdates() {
+        guard Self.isSupported else { return }
         // If we're already idle, then just check for updates immediately.
         if viewModel.state == .idle {
             updater.checkForUpdates()
