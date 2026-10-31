@@ -106,7 +106,7 @@ in
     postInstall = ''
       terminfo_src=${
         if stdenv.hostPlatform.isDarwin
-        then ''"$out/Applications/Ghostty.app/Contents/Resources/terminfo"''
+        then ''"$out/Applications/Ghostty Phil.app/Contents/Resources/terminfo"''
         else "$out/share/terminfo"
       }
 
