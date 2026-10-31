@@ -178,14 +178,25 @@ undo/redo acceptance remain outstanding, including the source-close sequence bel
 
 Companion Talon configuration adds `ghostty phil reload [config]`, targeting
 `Ghostty Phil|Reload Configuration` in `io.phillip.ghostty-phil`. Fork release/debug
-IDs are also recognized by terminal contexts and native routing. Existing global
-stock reload commands retain their targets. These integration changes received
+IDs are also recognized by terminal contexts and native routing. Explicit stock
+reload commands retain their targets; generic reload selects the active or running
+supported build. These integration changes received
 offline identity/routing and clipboard checks; no reload or other UI action was
 invoked. Companion-repository revisions and the narrow edit retained with existing
 Talon work in progress are listed in the installation receipt.
 
 Artifact provenance, remote cache/disk telemetry and local installation checks are
 recorded in [ghostty-phil-install-20261031.json](ghostty-phil-install-20261031.json).
+
+The subsequent full bundle audit covered SpeechLab, Talon (including hidden
+Cursorless sources), and Karabiner. SpeechLab's identity, AX/terminal, selection
+pasteboard and reference routing support both builds; the signed update was built
+on the mini, installed and background-restarted with its recognition settings
+restored. Talon launch/focus/rerun and global commands select the actual build.
+Karabiner's 24 matchers support release/debug IDs; all 21 affected legacy rules
+remain disabled. Native input, clipboard and window behavior were not exercised.
+Cross-project revisions, checks and runtime evidence are recorded in
+[bundle-integration-20261031.json](bundle-integration-20261031.json).
 
 ## Native acceptance when authorized
 

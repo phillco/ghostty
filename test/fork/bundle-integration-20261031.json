@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-31T17:22:53.023750+00:00",
+  "supported_bundle_identifiers": [
+    "com.mitchellh.ghostty",
+    "com.mitchellh.ghostty.debug",
+    "io.phillip.ghostty-phil",
+    "io.phillip.ghostty-phil.debug"
+  ],
+  "speechlab": {
+    "repository": "~/src/swiftprojects/SpeechLab",
+    "source_change": "a73602db79575db5bd512c8ea8e2102939ab344e",
+    "tooling_and_deployed_revision": "f0ec442647ed255f6da7537e00b78487ed0a59a8",
+    "deployment_bookmark": "deploy/2026-10-31-1019-ghostty-phil",
+    "installed_path": "~/Applications/SpeechLab.app",
+    "changes": [
+      "Central identity helper for terminal/AX/secure-copy routing",
+      "Separate stock and fork selection pasteboards, with independent change counts",
+      "Foreground build determines selection and reference-app routing",
+      "Fork app-name/path and input-context recognition",
+      "Explicit signed prebuilt installation path with exact revision validation"
+    ],
+    "stock_selection_pasteboard": "com.mitchellh.ghostty.selection",
+    "fork_selection_pasteboard": "io.phillip.ghostty-phil.selection",
+    "settings_audit": "Tracked and live settings CSVs contain no old-ID-exclusive routes; no persisted strategy migration needed.",
+    "host": "bedroom-mini",
+    "hostless_identity_tests_passed": 7,
+    "offline_tooling_tests_passed": 5,
+    "app_build": {
+      "source_commit": "f0ec442647ed255f6da7537e00b78487ed0a59a8",
+      "exit_code": 0,
+      "elapsed_seconds": 90.2,
+      "minimum_free_bytes": 82107371520
+    },
+    "compile_only_testing_build": {
+      "source_commit": "f0ec442647ed255f6da7537e00b78487ed0a59a8",
+      "exit_code": 0,
+      "elapsed_seconds": 100.2,
+      "minimum_free_bytes": 76000268288
+    },
+    "archive_sha256": "0762148a6370b005db54f858083aeba8f16b68f7b68c9669f17982f5a4cc3f8a",
+    "signature": "Developer ID Application: Phillip Cohen (45XPWL4B2Z)",
+    "certificate_sha1": "E73516A729D9EFB4EF6F44FDFA50C84CE3B25D0F",
+    "installed_deep_strict_signature_verified": true,
+    "artifact_relocatable": true,
+    "coverage_instrumentation": false,
+    "temporary_build_launchservices_registrations_remaining": [],
+    "owned_remote_build_allocated_mib": 846,
+    "free_disk_after_checks_gib": 70.74,
+    "local_validation_directory": "~/src/swiftprojects/SpeechLab-ghostty-phil/.build/remote-prebuilt/f0ec442647ed255f6da7537e00b78487ed0a59a8/validation",
+    "before_restart": {
+      "pid": 90623,
+      "date_iso": "2026-10-31T17:19:11.145Z",
+      "primary_recognition_engine": "Whisper",
+      "voice_activity_detector": "Parrot + Silero",
+      "effective_voice_activity_detector": "Parrot + Silero",
+      "is_listening": true,
+      "dictation_enabled": true,
+      "voice_activity_is_active": false,
+      "volatile_text_character_count": 0,
+      "pending_final_text_character_count": 0,
+      "is_starting_capture": false,
+      "rollback_app": "/var/folders/b_/z_1j5nyj3_lgs_2c2033xddw0000gp/T/ghostty-bundle-audit-speechlab-backup.bjbdyzjv/SpeechLab.app"
+    },
+    "after_restart": {
+      "pid": 39834,
+      "date_iso": "2026-10-31T17:19:42.030Z",
+      "primary_recognition_engine": "Whisper",
+      "voice_activity_detector": "Parrot + Silero",
+      "effective_voice_activity_detector": "Parrot + Silero",
+      "is_listening": true,
+      "dictation_enabled": true,
+      "voice_activity_is_active": true,
+      "volatile_text_character_count": 0,
+      "pending_final_text_character_count": 0,
+      "is_starting_capture": false,
+      "has_audio_engine": true,
+      "capture_suspension_reason": null,
+      "source_commit": "f0ec442647ed255f6da7537e00b78487ed0a59a8"
+    },
+    "foreground_bundle_before_and_after": "io.phillip.ghostty-phil",
+    "fresh_heartbeat_after_warmup": true,
+    "app_host_tests_launched": false,
+    "gui_app_launched_on_build_host": false
+  },
+  "talon": {
+    "repository": "~/.talon/user",
+    "audit_revision": "82ce2ae5d20f531482323cebc0627b3f228bdb71",
+    "alias_scope_followup": "e7f249dc004269aa4587731079f092c53d71cc71",
+    "inventory": "~/.talon/user/docs/ghostty-phil-talon-audit-20261031.json",
+    "text_files_scanned": 2480,
+    "active_source_config_files_reviewed": 43,
+    "changes": [
+      "Hidden Cursorless terminal guards",
+      "Native and tmux launch fallback targets",
+      "Generic focus/rerun/hotkey routes",
+      "Global reload/new/split targets",
+      "Explicit Phil controls support release/debug",
+      "Dynamic generic aliases, explicit stock/Phil aliases"
+    ],
+    "offline_working_source_tests_passed": 21,
+    "followup_alias_regression_passed": true,
+    "static_validation_and_grammar_parsing_passed": true,
+    "scoped_file_watch_loads_observed": true,
+    "scoped_runtime_log_errors_seen": false,
+    "actions_or_ui_invoked": false,
+    "retained_task_wip": {
+      "file": "_phil-private/integrations/ghostty/ghostty_clipboard.py",
+      "added_values": [
+        "io.phillip.ghostty-phil",
+        "io.phillip.ghostty-phil.debug"
+      ],
+      "reason": "These two lines belong inside an existing unrelated dirty implementation; that implementation was preserved without committing it."
+    }
+  },
+  "karabiner": {
+    "repository": "~/bin",
+    "source": "karabiner/karabiner.json",
+    "live_path": "~/.config/karabiner/karabiner.json",
+    "matcher_revision": "fadb7dc97c2da8d3e39ece4614a4c22dfa55d8e1",
+    "legacy_toggle_revision": "294131110a62f91fd853e12af7f1ec9f5182b097",
+    "matchers_updated": 24,
+    "affected_rules": 21,
+    "all_affected_rules_remain_disabled": true,
+    "regex_validation": {
+      "pattern": "^(com\\.mitchellh\\.ghostty|io\\.phillip\\.ghostty-phil)(\\.debug)?$",
+      "accepted": [
+        "com.mitchellh.ghostty",
+        "com.mitchellh.ghostty.debug",
+        "io.phillip.ghostty-phil",
+        "io.phillip.ghostty-phil.debug"
+      ],
+      "rejected": [
+        "comXmitchellhXghostty",
+        "com.mitchellh.ghostty.extra",
+        "com.mitchellh.ghostty.debug.extra",
+        "com.mitchellh.ghostty-debug",
+        "com.mitchellh.ghosttyPhil",
+        "xcom.mitchellh.ghostty",
+        "com.mitchellh.ghostty ",
+        " io.phillip.ghostty-phil",
+        "io.phillip.ghostty-phil ",
+        "ioXphillipXghostty-phil",
+        "io.phillip.ghostty.phil",
+        "io.phillip.ghostty-phil-debug",
+        "io.phillip.ghostty-phil.debugger",
+        "io.phillip.ghostty-phil.debug.extra",
+        "io.phillip.ghostty-phil.Debug",
+        "IO.phillip.ghostty-phil",
+        "io.phillip.ghostty-phil.dock-tile",
+        ""
+      ]
+    },
+    "semantic_scalar_changes": 25,
+    "all_unrelated_json_values_preserved": true,
+    "prettier_layout_normalization_retained_with_existing_wip": true,
+    "live_reload": {
+      "log": "~/.local/share/karabiner/log/console_user_server.log",
+      "fresh_lines": [
+        "[2026-10-31 10:13:12.725] [info] [console_user_server] Load ~/.config/karabiner/karabiner.json...",
+        "[2026-10-31 10:13:12.762] [info] [console_user_server] core_configuration is updated."
+      ],
+      "fresh_errors": [],
+      "fresh_configuration_updates": 1
+    },
+    "shortcuts_or_apps_invoked": false
+  },
+  "acceptance_limits": "No synthetic dictation, selection/clipboard mutation, shortcuts, menus, or window/focus UI tests were performed. SpeechLab was background-restarted through its existing drain/backup/install workflow and verified by signature, exact source revision, process replacement and fresh restored-state heartbeat."
+}
