@@ -29,6 +29,44 @@ pub fn deinit(self: StringMap, alloc: Allocator) void {
     map.deinit(alloc);
 }
 
+/// A range of UTF-8 bytes in the flattened screen text.
+pub const ByteRange = struct {
+    start: usize,
+    len: usize,
+};
+
+/// Returns the full byte range covered by the selection's endpoint cells.
+/// Multiple UTF-8 bytes may map to the same cell, so include all bytes of
+/// both endpoints. Reversed selections produce the same range.
+pub fn rangeForSelection(self: StringMap, screen: *const Screen, sel: Selection) ?ByteRange {
+    const start_pin = sel.topLeft(screen);
+    const end_pin = sel.bottomRight(screen);
+    var start_idx: ?usize = null;
+    var end_idx: ?usize = null;
+    for (0..self.map.count()) |idx| {
+        const pin = self.map.get(idx).?;
+        if (start_idx == null and pin.node == start_pin.node and pin.x == start_pin.x and pin.y == start_pin.y) {
+            start_idx = idx;
+        }
+        if (pin.node == end_pin.node and pin.x == end_pin.x and pin.y == end_pin.y) {
+            end_idx = idx;
+        }
+    }
+    const start = start_idx orelse return null;
+    const end = end_idx orelse return null;
+    if (end < start) return null;
+    return .{ .start = start, .len = end - start + 1 };
+}
+
+/// Maps a nonempty byte range to its endpoint cells. Clamp a range that
+/// extends past the map, and reject an empty range or an invalid start.
+pub fn selectionForRange(self: StringMap, start: usize, len: usize) ?Selection {
+    const count = self.map.count();
+    if (len == 0 or start >= count) return null;
+    const end = start + @min(len, count - start) - 1;
+    return Selection.init(self.map.get(start).?, self.map.get(end).?, false);
+}
+
 /// Returns an iterator that yields the next match of the given regex.
 /// Requires Ghostty to be compiled with regex support.
 pub const searchIterator = if (build_options.oniguruma)
@@ -293,4 +331,83 @@ test "StringMap searchIterator URL with click position" {
         }
     }
     try testing.expect(found_url);
+}
+
+test "StringMap accessibility ranges across wrapped lines" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var screen = try Screen.init(testing.io, alloc, .{
+        .cols = 5,
+        .rows = 3,
+        .max_scrollback_bytes = 0,
+    });
+    defer screen.deinit();
+    try screen.testWriteString("abcdeFGHIJ");
+    const map = try screen.selectionStringMap(alloc, .{
+        .sel = .init(screen.pages.getTopLeft(.screen), screen.pages.getBottomRight(.screen).?, false),
+        .trim = false,
+    });
+    defer map.deinit(alloc);
+
+    const sel = map.selectionForRange(3, 5).?;
+    try testing.expectEqual(point.Point{ .active = .{ .x = 3, .y = 0 } }, screen.pages.pointFromPin(.active, sel.start()).?);
+    try testing.expectEqual(point.Point{ .active = .{ .x = 2, .y = 1 } }, screen.pages.pointFromPin(.active, sel.end()).?);
+    try testing.expectEqual(ByteRange{ .start = 3, .len = 5 }, map.rangeForSelection(&screen, sel).?);
+    const reversed = Selection.init(sel.end(), sel.start(), false);
+    try testing.expectEqual(ByteRange{ .start = 3, .len = 5 }, map.rangeForSelection(&screen, reversed).?);
+}
+
+test "StringMap accessibility ranges preserve Unicode endpoint cells" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var screen = try Screen.init(testing.io, alloc, .{
+        .cols = 20,
+        .rows = 2,
+        .max_scrollback_bytes = 0,
+    });
+    defer screen.deinit();
+    try screen.testWriteString("aé界e\u{301}😀z");
+    const map = try screen.selectionStringMap(alloc, .{
+        .sel = .init(screen.pages.getTopLeft(.screen), screen.pages.getBottomRight(.screen).?, false),
+        .trim = false,
+    });
+    defer map.deinit(alloc);
+
+    // é, CJK, a combining grapheme, and emoji occupy 12 UTF-8 bytes.
+    const sel = map.selectionForRange(1, 12).?;
+    try testing.expectEqual(ByteRange{ .start = 1, .len = 12 }, map.rangeForSelection(&screen, sel).?);
+    const text = try screen.selectionString(alloc, .{ .sel = sel, .trim = false });
+    defer alloc.free(text);
+    try testing.expectEqualStrings("é界e\u{301}😀", text);
+
+    // A byte within a multibyte scalar still selects its entire cell.
+    const partial = map.selectionForRange(2, 1).?;
+    try testing.expectEqual(ByteRange{ .start = 1, .len = 2 }, map.rangeForSelection(&screen, partial).?);
+}
+
+test "StringMap accessibility ranges reject invalid starts and clamp length" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var screen = try Screen.init(testing.io, alloc, .{
+        .cols = 3,
+        .rows = 2,
+        .max_scrollback_bytes = 0,
+    });
+    defer screen.deinit();
+    try screen.testWriteString("abc");
+    const line = screen.selectLine(.{ .pin = screen.pages.getTopLeft(.active) }).?;
+    const map = try screen.selectionStringMap(alloc, .{ .sel = line, .trim = false });
+    defer map.deinit(alloc);
+
+    try testing.expect(map.selectionForRange(0, 0) == null);
+    try testing.expect(map.selectionForRange(map.map.count(), 1) == null);
+    try testing.expect(map.selectionForRange(std.math.maxInt(usize), 1) == null);
+    const clamped = map.selectionForRange(1, std.math.maxInt(usize)).?;
+    try testing.expectEqual(ByteRange{ .start = 1, .len = 2 }, map.rangeForSelection(&screen, clamped).?);
+
+    // A selection outside this map has no byte range in it.
+    const outside_pin = screen.pages.pin(.{ .active = .{ .x = 0, .y = 1 } }).?;
+    try testing.expect(map.rangeForSelection(&screen, .init(outside_pin, outside_pin, false)) == null);
+    const empty: StringMap = .{ .string = "", .map = .empty };
+    try testing.expect(empty.selectionForRange(0, 1) == null);
 }

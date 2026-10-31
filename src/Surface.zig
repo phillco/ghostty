@@ -2023,10 +2023,7 @@ pub const Text = struct {
 
 /// A selection range expressed as UTF-8 byte offsets into the flattened
 /// screen text (see `selectionString`).
-pub const SelectionRange = struct {
-    start: usize,
-    len: usize,
-};
+pub const SelectionRange = terminal.StringMap.ByteRange;
 
 /// Grab the value of text at the given selection point. Note that the
 /// selection structure is used as a way to determine the area of the
@@ -2202,28 +2199,7 @@ pub fn selectionRange(self: *Surface) !?SelectionRange {
     });
     defer map.deinit(self.alloc);
 
-    const start_pin = sel.topLeft(screen);
-    const end_pin = sel.bottomRight(screen);
-
-    var start_idx: ?usize = null;
-    var end_idx: ?usize = null;
-    for (0..map.map.count()) |idx| {
-        const pin = map.map.get(idx).?;
-        if (start_idx == null and pin.node == start_pin.node and pin.x == start_pin.x and pin.y == start_pin.y) {
-            start_idx = idx;
-        }
-        if (pin.node == end_pin.node and pin.x == end_pin.x and pin.y == end_pin.y) {
-            end_idx = idx;
-        }
-    }
-
-    if (start_idx == null or end_idx == null) return null;
-    if (end_idx.? < start_idx.?) return null;
-
-    return .{
-        .start = start_idx.?,
-        .len = end_idx.? - start_idx.? + 1,
-    };
+    return map.rangeForSelection(screen, sel);
 }
 
 /// Set the selection range using UTF-8 byte offsets into the flattened
@@ -2256,15 +2232,8 @@ pub fn setSelectionRange(self: *Surface, start: usize, len: usize) !bool {
     });
     defer map.deinit(self.alloc);
 
-    if (map.map.count() == 0) return false;
-    if (start >= map.map.count()) return false;
-
-    const end_unclamped = start + len - 1;
-    const end = if (end_unclamped < map.map.count()) end_unclamped else map.map.count() - 1;
-    const start_pin = map.map.get(start).?;
-    const end_pin = map.map.get(end).?;
-
-    try self.setSelection(terminal.Selection.init(start_pin, end_pin, false));
+    const sel = map.selectionForRange(start, len) orelse return false;
+    try self.setSelection(sel);
     did_set = true;
     return true;
 }
