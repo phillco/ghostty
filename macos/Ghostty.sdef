@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
 
-<dictionary title="Ghostty Scripting Dictionary">
+<dictionary title="Ghostty Phil Scripting Dictionary">
   <suite name="Ghostty Suite" code="Ghst" description="Ghostty scripting support.">
     <class name="application" code="capp" description="The Ghostty application.">
       <cocoa class="NSApplication"/>
