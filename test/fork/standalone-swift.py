@@ -87,6 +87,7 @@ def prepare_package(repo: Path, package: Path) -> None:
         "macos/Sources/Features/Terminal/TerminalTabColor.swift",
         "macos/Sources/Ghostty/NSEvent+Extension.swift",
         "macos/Sources/Helpers/ExpiringUndoManager.swift",
+        "macos/Sources/Helpers/SurfaceTreeUndoTarget.swift",
         "macos/Sources/Helpers/Extensions/UndoManager+Extension.swift",
         "macos/Sources/Helpers/Extensions/Duration+Extension.swift",
     )
@@ -95,6 +96,7 @@ def prepare_package(repo: Path, package: Path) -> None:
         "macos/Tests/Terminal/TerminalTabColorTests.swift",
         "macos/Tests/Ghostty/NSEventViewportTests.swift",
         "macos/Tests/Helpers/ExpiringUndoManagerTests.swift",
+        "macos/Tests/Helpers/SurfaceTreeUndoTargetTests.swift",
     )
     for relative in (
         *sources,

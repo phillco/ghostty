@@ -37,6 +37,9 @@ class BaseTerminalController: NSWindowController,
     private static let surfaceControllers =
         NSMapTable<Ghostty.SurfaceView, BaseTerminalController>.weakToWeakObjects()
 
+    /// Closed controllers can outlive their windows while undo snapshots retain panes.
+    private var isClosed = false
+
     /// The app instance that this terminal view will represent.
     let ghostty: Ghostty.App
 
@@ -250,18 +253,18 @@ class BaseTerminalController: NSWindowController,
     /// view relationship.
     static func controller(owning surface: Ghostty.SurfaceView) -> BaseTerminalController? {
         if let controller = surfaceControllers.object(forKey: surface),
-           controller.surfaceTree.contains(surface) {
+           !controller.isClosed, controller.surfaceTree.contains(surface) {
             return controller
         }
 
         if let controller = surface.window?.windowController as? BaseTerminalController,
-           controller.surfaceTree.contains(surface) {
+           !controller.isClosed, controller.surfaceTree.contains(surface) {
             return controller
         }
 
         return NSApp.windows
             .compactMap { $0.windowController as? BaseTerminalController }
-            .first { $0.surfaceTree.contains(surface) }
+            .first { !$0.isClosed && $0.surfaceTree.contains(surface) }
     }
 
     private static func updateSurfaceControllers(
@@ -361,9 +364,16 @@ class BaseTerminalController: NSWindowController,
     ) {
         guard let manager = undoManager else { return }
         guard let movedSurface = destination.surfaceTree.root?.leftmostLeaf() else { return }
+        // Anchor the source to its surviving panes, since undoing a tab close
+        // creates a new controller. The app owns the history so closing either
+        // controller cannot remove this move or retain a stale source controller.
+        let source = SurfaceTreeUndoTarget(
+            surfaces: tree.filter { $0 !== movedSurface },
+            owner: Self.controller(owning:))
         manager.setActionName("Move Split")
-        manager.registerDeferredUndo(
-            withTarget: self,
+        source.registerDeferredUndo(
+            in: manager,
+            withOwner: ghostty,
             expiresAfter: undoExpiration,
             undo: { source in
                 // Native close and source restoration run together on the next
@@ -1308,6 +1318,8 @@ class BaseTerminalController: NSWindowController,
 
     func windowWillClose(_ notification: Notification) {
         guard let window else { return }
+        isClosed = true
+        Self.updateSurfaceControllers(self, from: surfaceTree, to: .init())
 
         for surfaceView in surfaceTree {
             cancelPendingClipboardConfirmation(for: surfaceView)

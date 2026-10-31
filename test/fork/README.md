@@ -28,8 +28,9 @@ menu/AppleScript promotion of an entire tab to a window remains available.
 Promotion attaches an empty native tab before reparenting the live terminal,
 preserving its surface identity and process. It retains the configured new-tab
 position. Background destinations skip foreground presentation, application
-activation, and initial SwiftUI focus. Undo resolves the pane's current owner;
-native closing is deferred to retain the Tahoe crash workaround from PR #9512.
+activation, and initial SwiftUI focus. App-owned promotion undo resolves both
+source and destination by their surviving pane identities, including after a tab
+close is undone with a replacement controller. Native closing is deferred to retain the Tahoe crash workaround from PR #9512.
 
 ## Automated checks
 
@@ -129,7 +130,9 @@ Stage logs, source manifests and cache/disk telemetry are under
   parents must remain unchanged. A rejected native tab attachment must leave the
   original terminal view attached and its process running.
 - Undo/redo promotion; two promotions, undo twice, redo twice; undo immediately;
-  close the destination, undo close, then undo promotion. Check pane identity,
-  visible ownership and absence of duplicate/blank tabs throughout.
+  close the destination, undo close, then undo promotion; close the source, undo
+  close, undo promotion, then redo promotion. Repeat with a source containing
+  multiple surviving panes and after allowing the old source controller to release.
+  Check pane identity, visible ownership and absence of duplicate/blank tabs throughout.
 - Exercise existing menu/context/AppleScript promotion, tab colors, hover focus,
   AX text selection/bounds/caret, paste viewport preservation, and left-tab closing.
