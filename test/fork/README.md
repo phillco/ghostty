@@ -100,7 +100,7 @@ Validated source revision: `ecb85f9f43cca90c4eb3`. The laptop's ordinary zsh and
 
 The selected modern Xcode lacked Metal tools. The core and Zig tests used an
 already-installed Xcode 16.4 / SDK 15.5 through per-process `DEVELOPER_DIR`; app and
-hostless Swift compilation used the selected modern Xcode. Global Xcode selection
+hostless Swift compilation used Xcode 27.2 / SDK 27.2. Global Xcode selection
 was not changed. Temporary app LaunchServices registrations were removed explicitly.
 
 The standalone tests exposed an inherited expiry-record cleanup exclusivity crash.
@@ -108,6 +108,12 @@ The fix retains expiry records until collection mutation finishes and makes expi
 callbacks idempotent. A regression test clears redo history and reuses the manager.
 The suite also verifies repeated undo/redo keeps the remaining redo history and
 executes deferred mutations in FIFO order without registering duplicate inverses.
+
+The dedicated Zig cache peaked at 2.64 GiB and finished at 2.59 GiB, below its
+6 GiB limit. Free space never fell below the 8 GiB reserve (minimum sampled:
+19.23 GiB); no pruning was necessary. The complete job workspace finished at
+4.22 GiB. Snapshot provenance, stage exits and telemetry are preserved in
+[validation-20261031.json](validation-20261031.json).
 
 Stage logs, source manifests and cache/disk telemetry are under
 `~/src/buildbox/ghostty-rebase-20261031/logs` on the mini. No app-host/UI tests were run.
