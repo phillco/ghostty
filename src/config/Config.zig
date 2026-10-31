@@ -10722,6 +10722,29 @@ test "parse e: command and args" {
     try testing.expectEqualStrings(cmd.direct[2], "bar baz");
 }
 
+test "scroll-to-bottom paste defaults and flag parsing" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+
+    try testing.expect(cfg.@"scroll-to-bottom".keystroke);
+    try testing.expect(!cfg.@"scroll-to-bottom".output);
+    try testing.expect(cfg.@"scroll-to-bottom".paste);
+
+    var no_paste: TestIterator = .{ .data = &.{"--scroll-to-bottom=no-paste"} };
+    try cfg.loadIter(alloc, &no_paste);
+    try testing.expect(cfg.@"scroll-to-bottom".keystroke);
+    try testing.expect(!cfg.@"scroll-to-bottom".output);
+    try testing.expect(!cfg.@"scroll-to-bottom".paste);
+
+    var explicit: TestIterator = .{ .data = &.{"--scroll-to-bottom=no-keystroke,output,paste"} };
+    try cfg.loadIter(alloc, &explicit);
+    try testing.expect(!cfg.@"scroll-to-bottom".keystroke);
+    try testing.expect(cfg.@"scroll-to-bottom".output);
+    try testing.expect(cfg.@"scroll-to-bottom".paste);
+}
+
 test "clone default" {
     const testing = std.testing;
     const alloc = testing.allocator;

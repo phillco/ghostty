@@ -2653,3 +2653,38 @@ pub const CAPI = struct {
         }
     };
 };
+
+test "embedded key event preserves viewport through C and core conversion" {
+    const testing = std.testing;
+    for ([_]bool{ false, true }) |preserve_viewport| {
+        const raw: CAPI.KeyEvent = .{
+            .action = .press,
+            .mods = 0,
+            .consumed_mods = 0,
+            .keycode = 0,
+            .text = "x",
+            .unshifted_codepoint = 'x',
+            .composing = false,
+            .preserve_viewport = preserve_viewport,
+        };
+        const embedded = raw.keyEvent();
+        try testing.expectEqual(preserve_viewport, embedded.preserve_viewport);
+        const core = embedded.core().?;
+        try testing.expectEqual(preserve_viewport, core.preserve_viewport);
+        try testing.expectEqual(input.Action.press, core.action);
+        try testing.expectEqualStrings("x", core.utf8);
+        try testing.expectEqual(@as(u21, 'x'), core.unshifted_codepoint);
+    }
+
+    // Events constructed by an embedder retain the normal scrolling default.
+    const ordinary: App.KeyEvent = .{
+        .action = .press,
+        .mods = .{},
+        .consumed_mods = .{},
+        .keycode = 0,
+        .text = null,
+        .unshifted_codepoint = 0,
+        .composing = false,
+    };
+    try testing.expect(!ordinary.core().?.preserve_viewport);
+}
