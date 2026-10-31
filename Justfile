@@ -1,5 +1,7 @@
 set shell := ["zsh", "-lc"]
 
+zig := env_var_or_default("ZIG", "zig")
+
 app_bundle := "zig-out/Ghostty.app"
 install_app := env_var_or_default("GHOSTTY_INSTALL_APP", home_directory() + "/Applications/Ghostty.app")
 
@@ -44,23 +46,23 @@ install:
 
 # Core Zig workflows.
 run-zig *args:
-    zig build run -- {{args}}
+    "{{zig}}" build run -- {{args}}
 
 build-zig *args:
-    zig build {{args}}
+    "{{zig}}" build {{args}}
 
 build-core *args:
-    zig build -Demit-macos-app=false {{args}}
+    "{{zig}}" build -Demit-macos-app=false {{args}}
 
 test *args:
-    zig build test {{args}}
+    "{{zig}}" build test {{args}}
 
 test-filter filter *args:
-    zig build test -Dtest-filter={{quote(filter)}} {{args}}
+    "{{zig}}" build test -Dtest-filter={{quote(filter)}} {{args}}
 
 # Formatting and linting.
 fmt-zig:
-    zig fmt .
+    "{{zig}}" fmt .
 
 fmt-swift:
     swiftlint lint --strict --fix
@@ -74,7 +76,7 @@ fmt:
     just fmt-other
 
 check-zig:
-    zig fmt --check .
+    "{{zig}}" fmt --check .
 
 check-swift:
     swiftlint lint --strict
@@ -89,12 +91,13 @@ check:
 
 # macOS app workflows mirror macos/build.nu so they don't require Nushell.
 macos-build configuration="Debug" scheme="Ghostty":
+    just build-core -Dxcframework-target=native
     env -i HOME="${HOME}" PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
         xcodebuild \
         -project macos/Ghostty.xcodeproj \
         -scheme {{scheme}} \
         -configuration {{configuration}} \
-        "SYMROOT=build" \
+        "SYMROOT=build" REGISTER_APP_WITH_LAUNCH_SERVICES=NO \
         build
 
 macos-test configuration="Debug" scheme="Ghostty":

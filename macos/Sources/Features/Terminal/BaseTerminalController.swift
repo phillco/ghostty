@@ -360,10 +360,19 @@ class BaseTerminalController: NSWindowController,
         redo: @escaping (BaseTerminalController) -> Void
     ) {
         guard let manager = undoManager else { return }
+        guard let movedSurface = destination.surfaceTree.root?.leftmostLeaf() else { return }
         manager.setActionName("Move Split")
         manager.registerUndo(withTarget: self, expiresAfter: undoExpiration) { source in
             manager.disableUndoRegistration {
-                destination.closeTabImmediately(registerRedo: false)
+                // Closing and undoing a destination creates a new controller. Resolve
+                // ownership now rather than closing the original, possibly stale one.
+                if let owner = Self.controller(owning: movedSurface), owner !== source {
+                    if owner.surfaceTree.isSplit {
+                        _ = owner.detachSurfaceToOwnTree(movedSurface, background: true)
+                    } else if let owner = owner as? TerminalController {
+                        owner.closeTabImmediately(registerRedo: false)
+                    }
+                }
                 source.surfaceTree = tree
                 source.focusedSurface = focus
                 if let focus { source.restoreSourceFocus(focus) }
