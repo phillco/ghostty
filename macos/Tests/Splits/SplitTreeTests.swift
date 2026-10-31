@@ -129,6 +129,106 @@ struct SplitTreeTests {
         #expect(result.contains(.leaf(view: view2)))
     }
 
+    // MARK: - Detaching
+
+    @Test func detachingRequiresAnExistingSplitPane() throws {
+        let view = MockView()
+        #expect(SplitTree<MockView>().detaching(view: view) == nil)
+        #expect(SplitTree(view: view).detaching(view: view) == nil)
+
+        let (tree, member, _) = try makeHorizontalSplit()
+        // A different view with the same persistent ID is not the live pane.
+        #expect(tree.detaching(view: MockView(id: member.id)) == nil)
+        #expect(tree.detaching(view: view) == nil)
+        #expect(tree.count == 2)
+    }
+
+    @Test(arguments: [SplitTree<MockView>.NewDirection.left, .right, .up, .down])
+    func detachingEitherPaneCollapsesTwoPaneSplit(direction: SplitTree<MockView>.NewDirection) throws {
+        let first = MockView()
+        let second = MockView()
+        let tree = try SplitTree(view: first).inserting(view: second, at: first, direction: direction)
+
+        for (target, survivor) in [(first, second), (second, first)] {
+            let result = try #require(tree.detaching(view: target))
+            #expect(result.remaining.root == .leaf(view: survivor))
+            #expect(result.detached.root == .leaf(view: target))
+            #expect(!result.remaining.isSplit)
+            #expect(!result.detached.isSplit)
+            #expect(result.remaining.zoomed == nil)
+            #expect(result.detached.zoomed == nil)
+            #expect(result.remaining.first === survivor)
+            #expect(result.detached.first === target)
+        }
+        #expect(tree.count == 2)
+    }
+
+    @Test(arguments: 0..<4)
+    func detachingNestedPanePreservesOtherViewsAndLayout(targetIndex: Int) throws {
+        let views = (0..<4).map { _ in MockView() }
+        let left = SplitTree<MockView>.Node.split(.init(
+            direction: .vertical, ratio: 0.7, left: .leaf(view: views[0]), right: .leaf(view: views[1])))
+        let right = SplitTree<MockView>.Node.split(.init(
+            direction: .horizontal, ratio: 0.6, left: .leaf(view: views[2]), right: .leaf(view: views[3])))
+        let tree = SplitTree<MockView>(root: .split(.init(
+            direction: .horizontal, ratio: 0.3, left: left, right: right)), zoomed: nil)
+
+        let result = try #require(tree.detaching(view: views[targetIndex]))
+        let expectedLeft: SplitTree<MockView>.Node = targetIndex < 2 ? .leaf(view: views[1 - targetIndex]) : left
+        let expectedRight: SplitTree<MockView>.Node = targetIndex >= 2 ? .leaf(view: views[5 - targetIndex]) : right
+        #expect(result.remaining.root == .split(.init(
+            direction: .horizontal, ratio: 0.3, left: expectedLeft, right: expectedRight)))
+        #expect(result.detached.first === views[targetIndex])
+        #expect(result.detached.count == 1)
+        #expect(result.remaining.count == 3)
+        for (index, view) in views.enumerated() {
+            #expect(result.remaining.contains(where: { $0 === view }) == (index != targetIndex))
+        }
+        #expect(tree.root == .split(.init(direction: .horizontal, ratio: 0.3, left: left, right: right)))
+        #expect(tree.count == 4)
+    }
+
+    @Test(arguments: 0..<3)
+    func detachingPreservesOnlySurvivingZoom(targetIndex: Int) throws {
+        let views = (0..<3).map { _ in MockView() }
+        var tree = try SplitTree(view: views[0]).inserting(view: views[1], at: views[0], direction: .right)
+        tree = try tree.inserting(view: views[2], at: views[1], direction: .down)
+        let zoomed = SplitTree<MockView>.Node.leaf(view: views[1])
+        tree = .init(root: tree.root, zoomed: zoomed)
+
+        let result = try #require(tree.detaching(view: views[targetIndex]))
+        #expect(result.remaining.zoomed == (targetIndex == 1 ? nil : zoomed))
+        #expect(result.detached.zoomed == nil)
+        #expect(tree.zoomed == zoomed)
+    }
+
+    @Test func detachingClearsZoomWhenRemainingTreeIsOnePane() throws {
+        let (tree, first, second) = try makeHorizontalSplit()
+        let zoomed = SplitTree<MockView>(root: tree.root, zoomed: .leaf(view: second))
+        let result = try #require(zoomed.detaching(view: first))
+        #expect(result.remaining.first === second)
+        #expect(result.remaining.zoomed == nil)
+    }
+
+    @Test func detachingRetainsOriginalTreeForUndoSnapshot() throws {
+        let (tree, first, second) = try makeHorizontalSplit()
+        let original = SplitTree<MockView>(root: tree.root, zoomed: .leaf(view: second))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let snapshot = try encoder.encode(original)
+
+        let result = try #require(original.detaching(view: second))
+        #expect(result.remaining.first === first)
+        #expect(result.detached.first === second)
+        #expect(original[0] === first)
+        #expect(original[1] === second)
+        #expect(try encoder.encode(original) == snapshot)
+
+        let restored = try JSONDecoder().decode(SplitTree<MockView>.self, from: snapshot)
+        #expect(restored.map(\.id) == original.map(\.id))
+        #expect(try encoder.encode(restored) == snapshot)
+    }
+
     // MARK: - Focus Target
 
     @Test func focusTargetOnEmptyTreeReturnsNil() {

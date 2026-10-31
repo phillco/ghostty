@@ -171,6 +171,15 @@ extension SplitTree {
         return .init(root: newRoot, zoomed: newZoomed)
     }
 
+    /// Detach an existing split pane into a single-pane tree without creating views.
+    /// Returns nil for an empty tree, a lone pane, or a view outside this tree.
+    /// The original tree remains available for undo, and remaining splits retain
+    /// their layout and any zoomed node that still exists.
+    func detaching(view: ViewType) -> (remaining: Self, detached: Self)? {
+        guard isSplit, contains(where: { $0 === view }) else { return nil }
+        return (remaining: removing(.leaf(view: view)), detached: .init(view: view))
+    }
+
     /// Replace a node in the tree with a new node.
     func replacing(node: Node, with newNode: Node) throws -> Self {
         guard let root else { throw SplitError.viewNotFound }
