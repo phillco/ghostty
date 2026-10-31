@@ -210,6 +210,10 @@ pub const CommandPalette = extern struct {
     /// Check if an action is supported on GTK.
     fn isActionSupportedOnGtk(action: input.Binding.Action) bool {
         return switch (action) {
+            .move_split_to_new_tab,
+            .move_split_to_new_tab_background,
+            .move_split_to_new_window,
+            .move_split_to_new_window_background,
             .close_all_windows,
             .toggle_secure_input,
             .check_for_updates,

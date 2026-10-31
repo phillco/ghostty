@@ -7148,6 +7148,16 @@ pub const Keybinds = struct {
         if (comptime builtin.target.os.tag.isDarwin()) {
             try self.set.put(
                 alloc,
+                .{ .key = .{ .unicode = 'p' }, .mods = .{ .super = true } },
+                .move_split_to_new_tab_background,
+            );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'p' }, .mods = .{ .super = true, .shift = true } },
+                .move_split_to_new_tab,
+            );
+            try self.set.put(
+                alloc,
                 .{ .key = .{ .unicode = 'q' }, .mods = .{ .super = true } },
                 .{ .quit = {} },
             );
@@ -11416,4 +11426,21 @@ test "compatibility: window new-window" {
             cfg.@"macos-dock-drop-behavior",
         );
     }
+}
+
+test "macOS split promotion shortcuts" {
+    if (comptime !builtin.target.os.tag.isDarwin()) return error.SkipZigTest;
+    const testing = std.testing;
+    var cfg = try Config.default(testing.allocator);
+    defer cfg.deinit();
+    const background = cfg.keybind.set.get(.{
+        .key = .{ .unicode = 'p' },
+        .mods = .{ .super = true },
+    }).?;
+    try testing.expect(background.value_ptr.leaf.action == .move_split_to_new_tab_background);
+    const foreground = cfg.keybind.set.get(.{
+        .key = .{ .unicode = 'p' },
+        .mods = .{ .super = true, .shift = true },
+    }).?;
+    try testing.expect(foreground.value_ptr.leaf.action == .move_split_to_new_tab);
 }
