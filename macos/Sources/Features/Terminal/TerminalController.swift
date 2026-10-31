@@ -55,6 +55,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     /// For example, terminals executing custom scripts are not restorable.
     private var restorable: Bool = true
 
+    /// An empty promotion destination must survive until native tab attachment.
+    private var isPreparingPromotion = false
+
     /// The configuration derived from the Ghostty config so we don't need to rely on references.
     private(set) var derivedConfig: DerivedConfig
 
@@ -64,7 +67,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     init(_ ghostty: Ghostty.App,
          withBaseConfig base: Ghostty.SurfaceConfiguration? = nil,
          withSurfaceTree tree: SplitTree<Ghostty.SurfaceView>? = nil,
-         parent: NSWindow? = nil
+         parent: NSWindow? = nil,
+         preparingPromotion: Bool = false
     ) {
         // The window we manage is not restorable if we've specified a command
         // to execute. We do this because the restored window is meaningless at the
@@ -72,6 +76,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // as the script. We may want to revisit this behavior when we have scrollback
         // restoration.
         self.restorable = (base?.command ?? "") == ""
+        self.isPreparingPromotion = preparingPromotion
 
         // Setup our initial derived config based on the current app config
         self.derivedConfig = DerivedConfig(ghostty.config)
@@ -181,7 +186,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         }
 
         // If our surface tree is now nil then we close our window.
-        if to.isEmpty {
+        if to.isEmpty && !isPreparingPromotion {
             self.window?.close()
         }
     }
@@ -466,9 +471,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         let controller = TerminalController.init(
             ghostty,
             withBaseConfig: baseConfig,
-            withSurfaceTree: tree)
+            withSurfaceTree: tree.map { _ in SplitTree<Ghostty.SurfaceView>() },
+            preparingPromotion: tree != nil)
         controller.focusOnAppear = !background
-        controller.focusedSurface = tree?.root?.leftmostLeaf()
         controller.isBackgroundOpaque = parentController.isBackgroundOpaque
         guard let window = controller.window else { return nil }
 
@@ -511,13 +516,19 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // A failed attachment must leave the source tree and its undo stack intact.
         // Ordinary new-tab requests retain upstream's fallback to a standalone window.
         if tree != nil && !tabCreated {
-            controller.surfaceTree = .init()
+            controller.isPreparingPromotion = false
+            window.close()
             return nil
         }
 
         // Promotion commits its source-tree mutation only after attachment succeeds,
         // before registering the destination's undo action or presenting either view.
         onTabCreated?()
+        if let tree {
+            controller.surfaceTree = tree
+            controller.focusedSurfaceDidChange(to: tree.root?.leftmostLeaf())
+        }
+        controller.isPreparingPromotion = false
 
         if background {
             parent.tabGroup?.selectedWindow = selectedWindow
@@ -560,11 +571,10 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                 withTarget: controller,
                 expiresAfter: controller.undoExpiration
             ) { target in
-                // Close the tab when undoing
-                undoManager.disableUndoRegistration {
-                    if tree != nil {
-                        target.closeTabImmediately()
-                    } else {
+                // Preserve the deferred native close used to avoid Tahoe crashes.
+                // https://github.com/ghostty-org/ghostty/pull/9512
+                DispatchQueue.main.async {
+                    undoManager.disableUndoRegistration {
                         target.closeTab(nil)
                     }
                 }
@@ -618,10 +628,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                 }
             })
         guard let controller else {
-            // The temporary destination registered ownership during init. Reassert
-            // the unchanged source's ownership if AppKit rejected the attachment.
-            surfaceTree = originalTree
-            focusedSurface = originalFocus
+            // Attachment used an empty destination, so neither the source tree
+            // nor the live view's existing wrapper has changed.
             return nil
         }
         registerSplitPromotionUndo(controller, tree: originalTree, focus: originalFocus) { source in

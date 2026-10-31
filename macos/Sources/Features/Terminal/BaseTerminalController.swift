@@ -363,21 +363,29 @@ class BaseTerminalController: NSWindowController,
         guard let movedSurface = destination.surfaceTree.root?.leftmostLeaf() else { return }
         manager.setActionName("Move Split")
         manager.registerUndo(withTarget: self, expiresAfter: undoExpiration) { source in
-            manager.disableUndoRegistration {
-                // Closing and undoing a destination creates a new controller. Resolve
-                // ownership now rather than closing the original, possibly stale one.
-                if let owner = Self.controller(owning: movedSurface), owner !== source {
-                    if owner.surfaceTree.isSplit {
-                        _ = owner.detachSurfaceToOwnTree(movedSurface, background: true)
-                    } else if let owner = owner as? TerminalController {
-                        owner.closeTabImmediately(registerRedo: false)
+            // Keep close and restoration together on the next event-loop turn.
+            // Native tab closes during undo have caused crashes on macOS Tahoe.
+            // https://github.com/ghostty-org/ghostty/pull/9512
+            DispatchQueue.main.async {
+                manager.disableUndoRegistration {
+                    // A close followed by undo creates a new destination controller.
+                    if let owner = Self.controller(owning: movedSurface), owner !== source {
+                        if owner.surfaceTree.isSplit {
+                            _ = owner.detachSurfaceToOwnTree(movedSurface, background: true)
+                        } else if let owner = owner as? TerminalController {
+                            owner.closeTabImmediately(registerRedo: false)
+                        }
                     }
+                    source.surfaceTree = tree
+                    source.focusedSurfaceDidChange(to: focus)
+                    if let focus { source.restoreSourceFocus(focus) }
                 }
-                source.surfaceTree = tree
-                source.focusedSurface = focus
-                if let focus { source.restoreSourceFocus(focus) }
             }
-            manager.registerUndo(withTarget: source, expiresAfter: source.undoExpiration, handler: redo)
+            // Register redo while UndoManager is still undoing; queue the action
+            // itself so it also follows the deferred restoration when invoked fast.
+            manager.registerUndo(withTarget: source, expiresAfter: source.undoExpiration) { source in
+                DispatchQueue.main.async { redo(source) }
+            }
         }
     }
 
