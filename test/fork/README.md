@@ -6,6 +6,20 @@ were replayed individually; the upstream merge was omitted. The previous main is
 retained at `backup/main-before-upstream-20261031`. The previously uncommitted
 Close Tabs to the Left feature was preserved as a separate commit.
 
+## Ghostty Phil application identity
+
+The fork builds as `Ghostty Phil.app`, with bundle ID `io.phillip.ghostty-phil`
+(`io.phillip.ghostty-phil.debug` for Debug). Its install destination is
+`~/Applications/Ghostty Phil.app`. Product/module names are separate: the Swift
+module and Xcode scheme remain `Ghostty` for compatibility with nibs and tests.
+
+Native preferences, saved state, Dock defaults, icon notifications, selection
+pasteboard and pane drag identities are separate from stock Ghostty. The fork
+continues reading the shared `~/.config/ghostty` configuration; its macOS
+Application Support directory uses the fork identity. Upstream update checks are
+disabled so they cannot install a stock release over the fork. Translation catalog
+filenames retain the upstream domain.
+
 ## Promotion bindings
 
 The macOS fork defaults are Cmd-P for a background tab and Cmd-Shift-P for a
