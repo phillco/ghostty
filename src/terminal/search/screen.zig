@@ -804,12 +804,12 @@ pub const ScreenSearch = struct {
     }
 
     pub const Select = enum {
-        /// Next selection, in reverse order (newest to oldest),
-        /// non-wrapping.
+        /// Next older match, wrapping to the newest match.
+        /// With no selection, selects the newest match.
         next,
 
-        /// Prev selection, in forward order (oldest to newest),
-        /// non-wrapping.
+        /// Previous newer match, wrapping to the oldest match.
+        /// With no selection, selects the newest match.
         prev,
     };
 
@@ -889,38 +889,9 @@ pub const ScreenSearch = struct {
     }
 
     fn selectPrev(self: *ScreenSearch) Allocator.Error!bool {
-        // Get our previous match so we can change it. If we have no
-        // prior match, we have the easy task of getting the last.
-        var prev = if (self.selected) |*m| m else {
-            // Get our highlight (oldest match)
-            const hl: FlattenedHighlight = hl: {
-                if (self.history_results.items.len > 0) {
-                    // History is in reverse order, so last item is oldest
-                    const len = self.history_results.items.len;
-                    break :hl self.history_results.items[len - 1];
-                } else if (self.active_results.items.len > 0) {
-                    // Active is in forward order, so first item is oldest
-                    break :hl self.active_results.items[0];
-                } else {
-                    // No matches at all. Can't select anything.
-                    return false;
-                }
-            };
-
-            // Pin it so we can track any movement
-            const tracked = try hl.untracked().track(self.screen);
-            errdefer tracked.deinit(self.screen);
-
-            // Our selection is the last index since we just started
-            // and we store our selection.
-            const active_len = self.active_results.items.len;
-            const history_len = self.history_results.items.len;
-            self.selected = .{
-                .idx = active_len + history_len - 1,
-                .highlight = tracked,
-            };
-            return true;
-        };
+        // Both directions begin at the newest match when there is no
+        // selection. Subsequent navigation follows the requested direction.
+        var prev = if (self.selected) |*m| m else return self.selectNext();
 
         const active_len = self.active_results.items.len;
         const history_len = self.history_results.items.len;
@@ -1410,8 +1381,22 @@ test "select prev" {
     // Initially no selection
     try testing.expect(search.selectedMatch() == null);
 
-    // Select prev (oldest first)
+    // Select prev (newest first)
     try search.searchAll();
+    _ = try search.select(.prev);
+    {
+        const sel = search.selectedMatch().?.untracked();
+        try testing.expectEqual(point.Point{ .screen = .{
+            .x = 0,
+            .y = 2,
+        } }, t.screens.active.pages.pointFromPin(.screen, sel.start).?);
+        try testing.expectEqual(point.Point{ .screen = .{
+            .x = 3,
+            .y = 2,
+        } }, t.screens.active.pages.pointFromPin(.screen, sel.end).?);
+    }
+
+    // Prev match (wrap to oldest)
     _ = try search.select(.prev);
     {
         const sel = search.selectedMatch().?.untracked();
@@ -1436,20 +1421,6 @@ test "select prev" {
         try testing.expectEqual(point.Point{ .screen = .{
             .x = 3,
             .y = 2,
-        } }, t.screens.active.pages.pointFromPin(.screen, sel.end).?);
-    }
-
-    // Prev match (wrap)
-    _ = try search.select(.prev);
-    {
-        const sel = search.selectedMatch().?.untracked();
-        try testing.expectEqual(point.Point{ .screen = .{
-            .x = 0,
-            .y = 0,
-        } }, t.screens.active.pages.pointFromPin(.screen, sel.start).?);
-        try testing.expectEqual(point.Point{ .screen = .{
-            .x = 3,
-            .y = 0,
         } }, t.screens.active.pages.pointFromPin(.screen, sel.end).?);
     }
 }
@@ -1522,21 +1493,7 @@ test "select prev with history" {
     defer search.deinit();
     try search.searchAll();
 
-    // Select prev (oldest first, should be in history)
-    _ = try search.select(.prev);
-    {
-        const sel = search.selectedMatch().?.untracked();
-        try testing.expectEqual(point.Point{ .screen = .{
-            .x = 0,
-            .y = 0,
-        } }, t.screens.active.pages.pointFromPin(.screen, sel.start).?);
-        try testing.expectEqual(point.Point{ .screen = .{
-            .x = 3,
-            .y = 0,
-        } }, t.screens.active.pages.pointFromPin(.screen, sel.end).?);
-    }
-
-    // Select prev (towards newer, should move to active area)
+    // Select prev begins at the newest match in the active area.
     _ = try search.select(.prev);
     {
         const sel = search.selectedMatch().?.untracked();
@@ -1548,6 +1505,20 @@ test "select prev with history" {
             .x = 3,
             .y = 1,
         } }, t.screens.active.pages.pointFromPin(.active, sel.end).?);
+    }
+
+    // Prev wraps to the oldest match in history.
+    _ = try search.select(.prev);
+    {
+        const sel = search.selectedMatch().?.untracked();
+        try testing.expectEqual(point.Point{ .screen = .{
+            .x = 0,
+            .y = 0,
+        } }, t.screens.active.pages.pointFromPin(.screen, sel.start).?);
+        try testing.expectEqual(point.Point{ .screen = .{
+            .x = 3,
+            .y = 0,
+        } }, t.screens.active.pages.pointFromPin(.screen, sel.end).?);
     }
 }
 
@@ -2034,7 +2005,8 @@ test "feed after complete discovers prepended history pages" {
     try testing.expect(search.state.isComplete());
     try testing.expectEqual(1, search.active_results.items.len);
     try testing.expectEqual(1, search.history_results.items.len);
-    try testing.expect(try search.select(.prev));
+    try testing.expect(try search.select(.prev)); // newest
+    try testing.expect(try search.select(.prev)); // wrap to oldest
     const selected_idx = search.selected.?.idx;
     try testing.expectEqual(1, selected_idx);
     const selected_before = search.selectedMatch().?.untracked();

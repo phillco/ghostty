@@ -714,6 +714,7 @@ test "feed after complete discovers prepended snapshot history" {
     const partial = search.activeScreenSearch().?.matchesLen();
     try testing.expect(partial > 0);
     try testing.expect(partial < needle_count);
+    try testing.expect(try search.select(&t, .prev, .none)); // newest
     try testing.expect(try search.select(&t, .prev, .none));
     const selected_idx = search.activeScreenSearch().?.selected.?.idx;
     try testing.expectEqual(partial - 1, selected_idx);

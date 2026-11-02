@@ -72,6 +72,10 @@ refresh_active: bool = false,
 /// started (a needle is given).
 search: ?TerminalSearch = null,
 
+/// Navigation received before the search has established its match order.
+/// Keep requests in order so rapid keypresses are not lost during a search.
+pending_selects: std.ArrayList(ScreenSearch.Select) = .empty,
+
 /// The last-notified values used to diff search state into events.
 notify_state: NotifyState = .{},
 
@@ -116,11 +120,13 @@ pub fn init(alloc: Allocator, opts: Options) !Thread {
 /// Clean up the thread. This is only safe to call once the thread
 /// completes executing; the caller must join prior to this.
 pub fn deinit(self: *Thread) void {
+    self.pending_selects.deinit(self.alloc);
     self.refresh.deinit();
     self.wakeup.deinit();
     self.stop.deinit();
     self.loop.deinit();
     // Nothing can possibly access the mailbox anymore, destroy it.
+    while (self.mailbox.pop(global.io())) |message| message.deinit();
     self.mailbox.destroy(self.alloc);
 
     if (self.search) |*s| {
@@ -185,6 +191,7 @@ fn threadMain_(self: *Thread) !void {
         // If our loop is canceled then we drain our messages and quit.
         if (self.loop.stopped()) {
             while (self.mailbox.pop(global.io())) |message| {
+                defer message.deinit();
                 log.debug("mailbox message ignored during shutdown={}", .{message});
             }
 
@@ -197,6 +204,8 @@ fn threadMain_(self: *Thread) !void {
             try self.loop.run(.once);
             continue;
         };
+
+        try self.applyPendingSelects();
 
         // If we have an active search, we always send any pending
         // notifications. Even if the search is complete, there may be
@@ -256,10 +265,10 @@ fn feedLocked(self: *Thread, s: *TerminalSearch) void {
 /// Drain the mailbox.
 fn drainMailbox(self: *Thread) !void {
     while (self.mailbox.pop(global.io())) |message| {
+        defer message.deinit();
         log.debug("mailbox message={}", .{message});
         switch (message) {
             .change_needle => |v| {
-                defer v.deinit();
                 try self.changeNeedle(v.slice());
             },
             .select => |v| try self.select(v),
@@ -268,16 +277,44 @@ fn drainMailbox(self: *Thread) !void {
 }
 
 fn select(self: *Thread, sel: ScreenSearch.Select) !void {
+    if (self.search == null) return;
+    try self.pending_selects.append(self.alloc, sel);
+    try self.applyPendingSelects();
+}
+
+fn applyPendingSelects(self: *Thread) !void {
+    if (self.pending_selects.items.len == 0) return;
     const s = if (self.search) |*s| s else return;
 
-    self.opts.mutex.lockUncancelable(global.io());
-    defer self.opts.mutex.unlock(global.io());
+    while (self.pending_selects.items.len > 0) {
+        self.opts.mutex.lockUncancelable(global.io());
+        defer self.opts.mutex.unlock(global.io());
 
-    if (try s.select(self.opts.terminal, sel, .if_needed)) {
-        // No matter what we reset our selected match cache. This will
-        // trigger a callback which will trigger the renderer to wake up
-        // so it can be notified the screen scrolled.
-        self.notify_state.selected = null;
+        // Reconcile before checking readiness: a screen switch, resize, or
+        // restored history may have reopened a previously complete search.
+        s.feed(self.opts.terminal, false);
+
+        // A partial result set cannot wrap correctly. For the initial selection,
+        // however, results arrive newest first after the active area is searched,
+        // so the newest match is ready as soon as any match is available.
+        const screen = s.activeScreenSearch() orelse return;
+        if (!s.isComplete() and
+            (screen.selected != null or screen.state == .active or screen.matchesLen() == 0))
+        {
+            return;
+        }
+
+        const sel = self.pending_selects.items[0];
+        if (try s.select(self.opts.terminal, sel, .if_needed)) {
+            // No matter what we reset our selected match cache. This will
+            // trigger a callback which will trigger the renderer to wake up
+            // so it can be notified the screen scrolled.
+            self.notify_state.selected = null;
+        } else if (!s.isComplete()) {
+            // Reconciliation may have invalidated the results we saw above.
+            return;
+        }
+        _ = self.pending_selects.orderedRemove(0);
     }
 }
 
@@ -314,6 +351,8 @@ fn changeNeedle(self: *Thread, needle: []const u8) !void {
             );
         }
     }
+
+    self.pending_selects.clearRetainingCapacity();
 
     // No needle means stop the search.
     if (needle.len == 0) return;
@@ -536,6 +575,13 @@ pub const Message = union(enum) {
 
     /// Select a search result.
     select: ScreenSearch.Select,
+
+    fn deinit(self: Message) void {
+        switch (self) {
+            .change_needle => |v| v.deinit(),
+            .select => {},
+        }
+    }
 };
 
 /// Events that can be emitted from the search thread. The caller
@@ -678,4 +724,240 @@ test {
             .y = 0,
         } }, t.screens.active.pages.pointFromPin(.screen, sel.end).?);
     }
+}
+
+/// Drive the same incremental search work as threadMain_, without OS scheduling
+/// or timing assumptions, so tests can inject navigation before any history feed.
+fn testTick(self: *Thread) !void {
+    const s = if (self.search) |*s| s else return;
+    if (!s.isComplete()) switch (s.tick()) {
+        .complete, .progress => {},
+        .blocked => self.feedLocked(s),
+    };
+    try self.applyPendingSelects();
+}
+
+// The active search snapshots whole pages, including history rows on the same
+// page. Cross a page boundary so a match truly requires asynchronous searching.
+fn testScrollPastPage(t: *Terminal, stream: anytype) void {
+    const list = &t.screens.active.pages;
+    const last = list.pages.last.?;
+    while (list.pages.last.? == last) stream.nextSlice("\r\n");
+    for (0..list.rows) |_| stream.nextSlice("\r\n");
+}
+
+test "pending navigation selects newest history match once results arrive" {
+    const alloc = testing.allocator;
+    for ([_]ScreenSearch.Select{ .prev, .next }) |direction| {
+        var mutex: Mutex = .init;
+        var t: Terminal = try .init(testing.io, alloc, .{
+            .cols = 20,
+            .rows = 2,
+            .max_scrollback_bytes = std.math.maxInt(usize),
+        });
+        defer t.deinit(alloc);
+        var stream = t.vtStream();
+        defer stream.deinit();
+        stream.nextSlice("needle oldest\r\n");
+        for (0..10000) |_| stream.nextSlice("\r\n");
+        stream.nextSlice("needle newest\r\n");
+        testScrollPastPage(&t, &stream);
+
+        var thread: Thread = try .init(alloc, .{ .mutex = &mutex, .terminal = &t });
+        defer thread.deinit();
+        try thread.changeNeedle("needle");
+        try testing.expectEqual(0, thread.search.?.activeScreenSearch().?.matchesLen());
+        try thread.select(direction);
+        try testing.expectEqual(1, thread.pending_selects.items.len);
+        try testing.expect(thread.search.?.activeScreenSearch().?.selected == null);
+
+        var ticks: usize = 0;
+        while (!thread.search.?.isComplete()) : (ticks += 1) {
+            try testing.expect(ticks < 10000);
+            try testTick(&thread);
+        }
+        try thread.applyPendingSelects();
+        const screen = thread.search.?.activeScreenSearch().?;
+        try testing.expectEqual(2, screen.matchesLen());
+        try testing.expectEqual(0, screen.selected.?.idx);
+        const pin = screen.selectedMatch().?.untracked().start;
+        try testing.expectEqual(point.Point{ .screen = .{
+            .x = 0,
+            .y = 10001,
+        } }, t.screens.active.pages.pointFromPin(.screen, pin).?);
+        try testing.expect(t.screens.active.pages.pointFromPin(.viewport, pin) != null);
+        try testing.expectEqual(0, thread.pending_selects.items.len);
+        // Later progress and retries must not select again (prev would wrap).
+        try testTick(&thread);
+        try testing.expectEqual(0, screen.selected.?.idx);
+    }
+}
+
+test "pending navigation is discarded on needle change or empty search" {
+    const alloc = testing.allocator;
+    for ([_][]const u8{ "other", "" }) |replacement| {
+        var mutex: Mutex = .init;
+        var t: Terminal = try .init(testing.io, alloc, .{ .cols = 20, .rows = 2 });
+        defer t.deinit(alloc);
+        var stream = t.vtStream();
+        defer stream.deinit();
+        stream.nextSlice("needle other\r\n");
+        testScrollPastPage(&t, &stream);
+        var thread: Thread = try .init(alloc, .{ .mutex = &mutex, .terminal = &t });
+        defer thread.deinit();
+        try thread.changeNeedle("needle");
+        try thread.select(.prev);
+        try testing.expectEqual(1, thread.pending_selects.items.len);
+        try thread.changeNeedle(replacement);
+        try testing.expectEqual(0, thread.pending_selects.items.len);
+        if (replacement.len == 0) {
+            try testing.expect(thread.search == null);
+            try thread.changeNeedle("other");
+        }
+        var ticks: usize = 0;
+        while (!thread.search.?.isComplete()) : (ticks += 1) {
+            try testing.expect(ticks < 10000);
+            try testTick(&thread);
+        }
+        try testing.expect(thread.search.?.activeScreenSearch().?.selected == null);
+    }
+}
+
+test "pending navigation is discarded by end search thread teardown" {
+    const alloc = testing.allocator;
+    var mutex: Mutex = .init;
+    var t: Terminal = try .init(testing.io, alloc, .{ .cols = 20, .rows = 2 });
+    defer t.deinit(alloc);
+    var stream = t.vtStream();
+    defer stream.deinit();
+    stream.nextSlice("needle\r\n");
+    testScrollPastPage(&t, &stream);
+    {
+        var thread: Thread = try .init(alloc, .{ .mutex = &mutex, .terminal = &t });
+        defer thread.deinit();
+        try thread.changeNeedle("needle");
+        try thread.select(.prev);
+        try testing.expectEqual(1, thread.pending_selects.items.len);
+        // A needle that is still queued at shutdown also owns memory.
+        _ = thread.mailbox.push(testing.io, .{ .change_needle = try .init(
+            alloc,
+            @as([]const u8, &(@as([1024]u8, @splat('x')))),
+        ) }, .forever);
+        // end_search stops and joins the worker, then deinitializes it.
+    }
+    var thread: Thread = try .init(alloc, .{ .mutex = &mutex, .terminal = &t });
+    defer thread.deinit();
+    try thread.changeNeedle("needle");
+    var ticks: usize = 0;
+    while (!thread.search.?.isComplete()) : (ticks += 1) {
+        try testing.expect(ticks < 10000);
+        try testTick(&thread);
+    }
+    try testing.expect(thread.search.?.activeScreenSearch().?.selected == null);
+    try testing.expectEqual(0, thread.pending_selects.items.len);
+}
+
+test "pending navigation rechecks completion after restored history" {
+    const alloc = testing.allocator;
+    var mutex: Mutex = .init;
+    var t: Terminal = try .init(testing.io, alloc, .{
+        .cols = 20,
+        .rows = 2,
+        .max_scrollback_bytes = std.math.maxInt(usize),
+    });
+    defer t.deinit(alloc);
+    const list = &t.screens.active.pages;
+    var stream = t.vtStream();
+    defer stream.deinit();
+    stream.nextSlice("needle oldest\r\n");
+    while (list.totalPages() < 2) stream.nextSlice("blank\r\n");
+    for (0..list.rows) |_| stream.nextSlice("blank\r\n");
+    stream.nextSlice("needle newest");
+
+    var thread: Thread = try .init(alloc, .{ .mutex = &mutex, .terminal = &t });
+    defer thread.deinit();
+    try thread.changeNeedle("needle");
+    var ticks: usize = 0;
+    while (!thread.search.?.isComplete()) : (ticks += 1) {
+        try testing.expect(ticks < 10000);
+        try testTick(&thread);
+    }
+    try thread.select(.prev);
+    try testing.expectEqual(2, thread.search.?.activeScreenSearch().?.matchesLen());
+    try testing.expectEqual(0, thread.search.?.activeScreenSearch().?.selected.?.idx);
+
+    // Restored pages can reopen a completed search during select's feed.
+    // Wrapping must wait for that older frontier instead of using cached totals.
+    {
+        var allocation = try list.allocatePage(.{ .cols = 20, .rows = 1 });
+        defer allocation.deinit();
+        const page = allocation.page();
+        page.size.rows = 1;
+        for ("needle restored", 0..) |c, x| page.getRowAndCell(x, 0).cell.* = .init(c);
+        try allocation.finalize(.prepend, .{});
+    }
+    const restored = list.pages.first.?;
+    try testing.expect(thread.search.?.isComplete());
+    try thread.select(.prev);
+    try testing.expect(!thread.search.?.isComplete());
+    try testing.expectEqual(1, thread.pending_selects.items.len);
+    try testing.expectEqual(0, thread.search.?.activeScreenSearch().?.selected.?.idx);
+
+    ticks = 0;
+    while (!thread.search.?.isComplete()) : (ticks += 1) {
+        try testing.expect(ticks < 10000);
+        try testTick(&thread);
+    }
+    try thread.applyPendingSelects();
+    const screen = thread.search.?.activeScreenSearch().?;
+    try testing.expectEqual(3, screen.matchesLen());
+    try testing.expectEqual(2, screen.selected.?.idx);
+    try testing.expectEqual(restored, screen.selectedMatch().?.untracked().start.node);
+    try testing.expectEqual(0, thread.pending_selects.items.len);
+}
+
+test "pending navigation applies early then preserves queued request order" {
+    const alloc = testing.allocator;
+    var mutex: Mutex = .init;
+    var t: Terminal = try .init(testing.io, alloc, .{
+        .cols = 20,
+        .rows = 2,
+        .max_scrollback_bytes = std.math.maxInt(usize),
+    });
+    defer t.deinit(alloc);
+    var stream = t.vtStream();
+    defer stream.deinit();
+    for (0..3) |_| {
+        stream.nextSlice("needle\r\n");
+        testScrollPastPage(&t, &stream);
+    }
+
+    var thread: Thread = try .init(alloc, .{ .mutex = &mutex, .terminal = &t });
+    defer thread.deinit();
+    try thread.changeNeedle("needle");
+    try thread.select(.prev);
+    try thread.select(.next);
+    try thread.select(.next);
+    try testing.expectEqual(3, thread.pending_selects.items.len);
+
+    var ticks: usize = 0;
+    while (thread.pending_selects.items.len == 3) : (ticks += 1) {
+        try testing.expect(ticks < 10000);
+        try testTick(&thread);
+    }
+    // The first request lands on the newest match before all older pages have
+    // been searched. Later requests remain queued until wrapping is reliable.
+    try testing.expect(!thread.search.?.isComplete());
+    try testing.expectEqual(2, thread.pending_selects.items.len);
+    try testing.expectEqual(0, thread.search.?.activeScreenSearch().?.selected.?.idx);
+
+    while (!thread.search.?.isComplete()) : (ticks += 1) {
+        try testing.expect(ticks < 10000);
+        try testTick(&thread);
+    }
+    try thread.applyPendingSelects();
+    const screen = thread.search.?.activeScreenSearch().?;
+    try testing.expectEqual(3, screen.matchesLen());
+    try testing.expectEqual(2, screen.selected.?.idx);
+    try testing.expectEqual(0, thread.pending_selects.items.len);
 }
