@@ -98,6 +98,9 @@
       <property name="working directory" code="Gwdr" type="text" access="r" description="Current working directory for the terminal process."/>
       <property name="pid" code="Gpid" type="integer" access="r" description="PID of the foreground process in this terminal."/>
       <property name="tty" code="Gtty" type="text" access="r" description="TTY device path for this terminal (e.g. /dev/ttys016)."/>
+      <property name="scrollback text" code="GsbT" type="text" access="r" description="Plain text of the entire primary screen, including scrollback, with soft-wrapped lines joined.">
+        <cocoa key="scrollbackText"/>
+      </property>
       <property name="tab color" code="GTcL" type="tab color" access="rw" description="Current tab color for the containing terminal window.">
         <cocoa key="tabColor"/>
       </property>

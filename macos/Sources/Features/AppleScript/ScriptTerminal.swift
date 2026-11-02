@@ -1,4 +1,5 @@
 import AppKit
+import GhosttyKit
 
 /// AppleScript-facing wrapper around a live Ghostty terminal surface.
 ///
@@ -14,6 +15,7 @@ import AppKit
 /// - `property working directory` -> `@objc(workingDirectory)` getter below.
 /// - `property pid` -> `@objc(pid)` getter below.
 /// - `property tty` -> `@objc(tty)` getter below.
+/// - `property scrollback text` -> `@objc(scrollbackText)` getter below.
 ///
 /// We keep only a weak reference to the underlying `SurfaceView` so this
 /// wrapper never extends the terminal's lifetime.
@@ -84,6 +86,18 @@ final class ScriptTerminal: NSObject {
     var tty: String {
         guard NSApp.isAppleScriptEnabled else { return "" }
         return surfaceView?.surfaceModel?.ttyName ?? ""
+    }
+
+    /// Plain text of the primary screen, including scrollback and active rows.
+    @objc(scrollbackText)
+    var scrollbackText: String {
+        guard NSApp.isAppleScriptEnabled else { return "" }
+        guard let surface = surfaceView?.surface else { return "" }
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_scrollback(surface, &text) else { return "" }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let pointer = text.text else { return "" }
+        return String(bytes: UnsafeRawBufferPointer(start: pointer, count: Int(text.text_len)), encoding: .utf8) ?? ""
     }
 
     /// Exposed as the AppleScript `tab color` property.

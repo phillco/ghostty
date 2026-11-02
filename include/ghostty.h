@@ -1259,6 +1259,10 @@ GHOSTTY_API bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_
 GHOSTTY_API bool ghostty_surface_read_text(ghostty_surface_t,
                                               ghostty_selection_s,
                                               ghostty_text_s*);
+// Read the entire primary screen, including scrollback, with soft wraps joined.
+// Free the returned text with ghostty_surface_free_text.
+GHOSTTY_API bool ghostty_surface_read_scrollback(ghostty_surface_t,
+                                               ghostty_text_s*);
 GHOSTTY_API void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
 GHOSTTY_API bool ghostty_surface_cursor_position(ghostty_surface_t,
                                                ghostty_cursor_position_s*);

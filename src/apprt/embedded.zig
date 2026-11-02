@@ -2018,6 +2018,50 @@ pub const CAPI = struct {
         return readTextLocked(surface, core_sel, result);
     }
 
+    /// Read the entire primary screen, even when the alternate screen is active.
+    /// The caller owns the result and must call ghostty_surface_free_text.
+    export fn ghostty_surface_read_scrollback(
+        surface: *Surface,
+        result: *Text,
+    ) bool {
+        const core_surface = &surface.core_surface;
+        core_surface.renderer_state.mutex.lockUncancelable(global.io());
+        defer core_surface.renderer_state.mutex.unlock(global.io());
+
+        const text = readScrollbackText(
+            global.alloc(),
+            &core_surface.io.terminal.screens,
+        ) catch |err| {
+            log.warn("error reading scrollback text err={}", .{err});
+            return false;
+        };
+        result.* = .{
+            // Primary screen text need not be in the current viewport.
+            .tl_px_x = -1,
+            .tl_px_y = -1,
+            .offset_start = 0,
+            .offset_len = 0,
+            .text = text.ptr,
+            .text_len = text.len,
+        };
+        return true;
+    }
+
+    fn readScrollbackText(
+        alloc: Allocator,
+        screens: *terminal.ScreenSet,
+    ) ![:0]const u8 {
+        const screen = screens.get(.primary).?;
+        return screen.selectionString(alloc, .{
+            .sel = .init(
+                screen.pages.getTopLeft(.screen),
+                screen.pages.getBottomRight(.screen) orelse return error.EmptyScreen,
+                false,
+            ),
+            .trim = false,
+        });
+    }
+
     fn readTextLocked(
         surface: *Surface,
         core_sel: terminal.Selection,
@@ -2653,6 +2697,35 @@ pub const CAPI = struct {
         }
     };
 };
+
+test "embedded scrollback text reads primary history and unwraps lines" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var t: terminal.Terminal = try .init(testing.io, alloc, .{
+        .cols = 5,
+        .rows = 2,
+        .max_scrollback_bytes = 1024 * 1024,
+    });
+    defer t.deinit(alloc);
+
+    const primary = t.screens.get(.primary).?;
+    try primary.testWriteString("abcdefghij\nklmno");
+    try testing.expect(primary.pages.getBottomRight(.history) != null);
+
+    const before = try CAPI.readScrollbackText(alloc, &t.screens);
+    defer alloc.free(before);
+    try testing.expectEqualStrings("abcdefghij\nklmno", before);
+    try testing.expect(primary.selection == null);
+
+    _ = try t.switchScreen(.alternate);
+    try t.printString("other");
+    const after = try CAPI.readScrollbackText(alloc, &t.screens);
+    defer alloc.free(after);
+    try testing.expectEqualStrings(before, after);
+    try testing.expectEqual(.alternate, t.screens.active_key);
+    try testing.expect(primary.selection == null);
+    try testing.expect(t.screens.active.selection == null);
+}
 
 test "embedded key event preserves viewport through C and core conversion" {
     const testing = std.testing;
