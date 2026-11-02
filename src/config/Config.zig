@@ -1470,9 +1470,9 @@ scrollbar: Scrollbar = .system,
 /// TODO: This can't currently be set!
 link: RepeatableLink = .{},
 
-/// Enable URL matching. URLs are matched on hover with control (Linux) or
-/// command (macOS) pressed and open using the default system application for
-/// the linked URL.
+/// Enable URL matching. URLs are underlined on hover and can be clicked
+/// without holding a modifier to open in the default system application.
+/// Drag across a URL to select its text.
 ///
 /// The URL matcher is always lowest priority of any configured links (see
 /// `link`). If you want to customize URL matching, use `link` and disable this.
@@ -1485,6 +1485,18 @@ link: RepeatableLink = .{},
 ///
 /// Available since: 1.4.0
 @"link-osc8": bool = true,
+
+/// Control underlines for detected URLs and OSC 8 hyperlinks.
+///
+/// The default, `hover`, underlines a link when the mouse is over it.
+/// With `always`, links have a single underline at rest and a double
+/// underline on hover. Application-provided underlines remain visible in both
+/// modes.
+///
+/// Links can be clicked without holding a modifier. Applications capturing
+/// the mouse retain their mouse handling; hold shift to bypass capture when
+/// permitted by `mouse-shift-capture`.
+@"link-underline": LinkUnderline = .hover,
 
 /// Show link previews for a matched URL.
 ///
@@ -4091,7 +4103,7 @@ pub fn default(alloc_gpa: Allocator) Allocator.Error!Config {
     try result.link.links.append(alloc, .{
         .regex = url.regex,
         .action = .{ .open = {} },
-        .highlight = .{ .hover_mods = inputpkg.ctrlOrSuper(.{}) },
+        .highlight = .hover,
     });
 
     return result;
@@ -5551,6 +5563,8 @@ pub const WindowSubtitle = enum {
     false,
     @"working-directory",
 };
+
+pub const LinkUnderline = enum { hover, always };
 
 pub const LinkPreviews = enum {
     false,
@@ -11443,4 +11457,20 @@ test "macOS split promotion shortcuts" {
         .mods = .{ .super = true, .shift = true },
     }).?;
     try testing.expect(foreground.value_ptr.leaf.action == .move_split_to_new_tab);
+}
+
+test "link configuration defaults and always underlines" {
+    const testing = std.testing;
+    var cfg = try Config.default(testing.allocator);
+    defer cfg.deinit();
+    const alloc = cfg._arena.?.allocator();
+    try testing.expectEqual(.hover, cfg.@"link-underline");
+    try testing.expectEqual(inputpkg.Link.Highlight.hover, cfg.link.links.items[0].highlight);
+    var it: TestIterator = .{ .data = &.{ "--link-underline=always", "--link-osc8=false" } };
+    try cfg.loadIter(alloc, &it);
+    try cfg.finalize();
+    try testing.expectEqual(.always, cfg.@"link-underline");
+    try testing.expect(!cfg.@"link-osc8");
+    // Persistent decoration does not add a modifier requirement to clicking.
+    try testing.expectEqual(inputpkg.Link.Highlight.hover, cfg.link.links.items[0].highlight);
 }

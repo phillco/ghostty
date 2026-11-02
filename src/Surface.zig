@@ -261,6 +261,14 @@ const Mouse = struct {
     /// only process link hover events when the mouse actually moves cells.
     link_point: ?terminal.point.Coordinate = null,
 
+    /// Only a single selection gesture may open a link on release. Captured
+    /// mouse events and repeated clicks belong to the terminal/selection.
+    fn canOpenLink(self: *const Mouse, captured: bool) bool {
+        return self.over_link and !captured and
+            self.selection_gesture.left_click_count == 1 and
+            !self.selection_gesture.left_click_dragged;
+    }
+
     /// Return the left-click pin only if it still belongs to the active screen.
     fn activeLeftClickPin(self: *const Mouse, screens: *const terminal.ScreenSet) ?*terminal.Pin {
         return self.selection_gesture.validatedLeftClickPin(screens);
@@ -1736,6 +1744,8 @@ fn mouseRefreshLinks(
     // No link, if we're previously over a link then we need to clear
     // the over-link apprt state.
     if (over_link) {
+        // Removing hover must rebuild the old underline as well.
+        self.renderer_state.terminal.screens.active.dirty.hyperlink_hover = true;
         _ = try self.rt_app.performAction(
             .{ .surface = self },
             .mouse_shape,
@@ -4101,7 +4111,9 @@ pub fn mouseButtonCallback(
         // Handle link clicking. We want to do this before we do mouse
         // reporting or any other mouse handling because a successfully
         // clicked link will swallow the event.
-        if (self.mouse.over_link and !self.mouse.selection_gesture.left_click_dragged) {
+        if (self.mouse.canOpenLink(
+            self.io.terminal.flags.mouse_event != .none and !(mods.shift and !shift_capture),
+        )) {
             // We are holding the renderer lock, but this should just be
             // a cached value.
             const pos = release_pos orelse try self.rt_surface.getCursorPos();
@@ -4529,10 +4541,8 @@ fn linkAtPos(
     // Get our comparison mods
     const mouse_mods = self.mouseModsWithCapture(self.mouse.mods);
 
-    // If we have the proper modifiers set then we can check for OSC8 links.
-    if (self.config.link_osc8 and
-        mouse_mods.equal(input.ctrlOrSuper(.{})))
-    hyperlink: {
+    // OSC8 links are clickable without a modifier, like detected URLs.
+    if (self.config.link_osc8) hyperlink: {
         const rac = mouse_pin.rowAndCell();
         const cell = rac.cell;
         if (!cell.hyperlink) break :hyperlink;
@@ -6823,4 +6833,55 @@ test "promptClickRelativeRow" {
         );
         try testing.expectEqual(case.expected, promptClickRelativeRow(&pages, prompt, click));
     }
+}
+
+test "Mouse link release preserves capture drag and repeated selection" {
+    const testing = std.testing;
+    var mouse: Mouse = .{ .over_link = true };
+    // A captured press resets the gesture: a stale hover cannot open on release.
+    try testing.expect(!mouse.canOpenLink(false));
+    mouse.selection_gesture.left_click_count = 1;
+    try testing.expect(mouse.canOpenLink(false));
+    try testing.expect(!mouse.canOpenLink(true));
+    mouse.selection_gesture.left_click_dragged = true;
+    try testing.expect(!mouse.canOpenLink(false));
+    mouse.selection_gesture.left_click_dragged = false;
+    mouse.selection_gesture.left_click_count = 2;
+    try testing.expect(!mouse.canOpenLink(false));
+    mouse.selection_gesture.left_click_count = 3;
+    try testing.expect(!mouse.canOpenLink(false));
+    mouse.selection_gesture.left_click_count = 1;
+    mouse.over_link = false;
+    try testing.expect(!mouse.canOpenLink(false));
+}
+
+test "linkAtPos detects URLs and OSC8 without modifiers" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var cfg = try configpkg.Config.default(alloc);
+    defer cfg.deinit();
+    const surface = try alloc.create(Surface);
+    defer alloc.destroy(surface);
+    surface.alloc = alloc;
+    surface.config = try DerivedConfig.init(alloc, &cfg);
+    defer surface.config.deinit();
+    surface.mouse = .{};
+    surface.size = .{
+        .screen = .{ .width = 80, .height = 2 },
+        .cell = .{ .width = 1, .height = 1 },
+        .padding = .{},
+    };
+    surface.io.terminal = try .init(testing.io, alloc, .{ .cols = 80, .rows = 2 });
+    defer surface.io.terminal.deinit(alloc);
+    var mutex: std.Io.Mutex = .init;
+    surface.renderer_state = .{ .mutex = &mutex, .terminal = &surface.io.terminal };
+    var stream = surface.io.terminal.vtStream();
+    defer stream.deinit();
+    stream.nextSlice("https://example.com ");
+    stream.nextSlice("\x1b]8;;https://example.org\x1b\\LABEL\x1b]8;;\x1b\\");
+    try testing.expectEqual(input.Link.Action.open, (try surface.linkAtPos(.{ .x = 0, .y = 0 })).?.action);
+    try testing.expectEqual(input.Link.Action._open_osc8, (try surface.linkAtPos(.{ .x = 20, .y = 0 })).?.action);
+    surface.config.link_osc8 = false;
+    try testing.expectEqual(null, try surface.linkAtPos(.{ .x = 20, .y = 0 }));
+    try testing.expectEqual(input.Link.Action.open, (try surface.linkAtPos(.{ .x = 0, .y = 0 })).?.action);
 }

@@ -273,6 +273,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
         /// The render state we update per loop.
         terminal_state: terminal.RenderState = .empty,
+        link_cells: link.CellMap = .empty,
 
         /// The number of frames since the last terminal state reset.
         /// We reset the terminal state after ~100,000 frames (about 10 to
@@ -617,6 +618,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             bg_image_fit: configpkg.BackgroundImageFit,
             bg_image_repeat: bool,
             links: link.Set,
+            link_osc8: bool,
             vsync: bool,
             colorspace: configpkg.Config.WindowColorspace,
             blending: configpkg.Config.AlphaBlending,
@@ -652,10 +654,11 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 font_styles.set(.bold_italic, config.@"font-style-bold-italic" != .false);
 
                 // Our link configs
-                const links = try link.Set.fromConfig(
+                var links = try link.Set.fromConfig(
                     alloc,
                     config.link.links.items,
                 );
+                links.always = config.@"link-underline" == .always;
 
                 return .{
                     .background_opacity = @max(0, @min(1, config.@"background-opacity")),
@@ -692,6 +695,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     .bg_image_fit = config.@"background-image-fit",
                     .bg_image_repeat = config.@"background-image-repeat",
                     .links = links,
+                    .link_osc8 = config.@"link-osc8",
                     .vsync = config.@"window-vsync",
                     .colorspace = config.@"window-colorspace",
                     .blending = config.@"alpha-blending",
@@ -845,6 +849,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
             if (self.overlay) |*overlay| overlay.deinit(self.alloc);
             self.terminal_state.deinit(self.alloc);
+            self.link_cells.deinit(self.alloc);
             if (self.search_selected_match) |*m| m.arena.deinit();
             if (self.search_matches) |*m| m.arena.deinit();
 
@@ -1398,7 +1403,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
             // Data we extract out of the critical area.
             const Critical = struct {
-                links: terminal.RenderState.CellSet,
+                links: link.CellMap,
                 mouse: renderer.State.Mouse,
                 preedit: ?renderer.State.Preedit,
                 scrollbar: terminal.Scrollbar,
@@ -1525,23 +1530,16 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     self.images_rebuilt = true;
                 }
 
-                // Get our OSC8 links we're hovering if we have a mouse.
-                // This requires terminal state because of URLs.
-                const links: terminal.RenderState.CellSet = osc8: {
-                    // If our mouse isn't hovering, we have no links.
-                    const vp = state.mouse.point orelse break :osc8 .empty;
-
-                    // If the right mods aren't pressed, then we can't match.
-                    if (!state.mouse.mods.equal(inputpkg.ctrlOrSuper(.{})))
-                        break :osc8 .empty;
-
-                    break :osc8 self.terminal_state.linkCells(
-                        arena_alloc,
-                        vp,
-                    ) catch |err| {
-                        log.warn("error searching for OSC8 links err={}", .{err});
-                        break :osc8 .empty;
-                    };
+                // OSC8 identity lookup must happen while terminal pages are locked.
+                const links = link.osc8CellMap(
+                    arena_alloc,
+                    &self.terminal_state,
+                    state.mouse.point,
+                    self.config.links.always,
+                    self.config.link_osc8,
+                ) catch |err| links: {
+                    log.warn("error searching for OSC8 links err={}", .{err});
+                    break :links link.CellMap.empty;
                 };
 
                 const overlay_features: []const Overlay.Feature = overlay: {
@@ -1572,10 +1570,19 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 arena_alloc,
                 &critical.links,
                 &self.terminal_state,
-                state.mouse.point,
-                state.mouse.mods,
+                critical.mouse.point,
+                critical.mouse.mods,
             ) catch |err| {
                 log.warn("error searching for regex links err={}", .{err});
+            };
+
+            link.updateDirtyRows(
+                self.alloc,
+                &self.link_cells,
+                &critical.links,
+                &self.terminal_state,
+            ) catch |err| {
+                log.warn("error caching link decorations err={}", .{err});
             };
 
             // Clear our highlight state and update.
@@ -2631,7 +2638,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             self: *Self,
             preedit: ?renderer.State.Preedit,
             cursor_style_: ?renderer.CursorStyle,
-            links: *const terminal.RenderState.CellSet,
+            links: *const link.CellMap,
         ) Allocator.Error!void {
             const state: *terminal.RenderState = &self.terminal_state;
 
@@ -2930,7 +2937,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             preedit_range: ?PreeditRange,
             selection: ?[2]terminal.size.CellCountInt,
             highlights: *const std.ArrayList(terminal.RenderState.Highlight),
-            links: *const terminal.RenderState.CellSet,
+            links: *const link.CellMap,
         ) !void {
             const state = &self.terminal_state;
 
@@ -3242,21 +3249,13 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     continue;
                 }
 
-                // Give links a single underline, unless they already have
-                // an underline, in which case use a double underline to
-                // distinguish them.
-                const underline: terminal.Attribute.Underline = underline: {
-                    if (links.contains(.{
-                        .x = @intCast(x),
-                        .y = @intCast(y),
-                    })) {
-                        break :underline if (style.flags.underline == .single)
-                            .double
-                        else
-                            .single;
-                    }
-                    break :underline style.flags.underline;
-                };
+                const underline: terminal.Attribute.Underline = if (links.get(.{
+                    .x = @intCast(x),
+                    .y = @intCast(y),
+                })) |highlight|
+                    highlight.underline(style.flags.underline, self.config.links.always)
+                else
+                    style.flags.underline;
 
                 // We draw underlines first so that they layer underneath text.
                 // This improves readability when a colored underline is used
