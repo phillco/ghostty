@@ -48,8 +48,11 @@ const no_trailing_punctuation =
     \\(?<![,.])
 ;
 
-const no_trailing_colon =
-    \\(?<!:)
+/// Paths are often followed by sentence punctuation ("see /tmp/a.png."), so
+/// don't end on a colon, comma, semicolon, or period. A trailing "." or ".."
+/// is kept when it is a whole path segment ("../..").
+const no_trailing_path_punctuation =
+    \\(?:(?<=\/\.)|(?<=\/\.\.)|(?<![:,;.]))
 ;
 
 const dotted_path_lookahead =
@@ -87,12 +90,12 @@ const rooted_or_relative_path_branch =
     dotted_path_lookahead ++
     path_chars ++ "+" ++
     dotted_path_space_segments ++
-    no_trailing_colon ++
+    no_trailing_path_punctuation ++
     "|" ++
     non_dotted_path_lookahead ++
     path_chars ++ "+" ++
     any_path_space_segments ++
-    no_trailing_colon ++
+    no_trailing_path_punctuation ++
     ")";
 
 // Branch 3: Bare relative paths such as src/config/url.zig.
@@ -104,7 +107,7 @@ const bare_relative_path_branch =
     dotted_path_lookahead ++
     bare_relative_path_prefix ++
     path_chars ++ "+" ++
-    no_trailing_colon;
+    no_trailing_path_punctuation;
 
 pub const regex =
     scheme_url_branch ++
@@ -336,8 +339,33 @@ test "url regex" {
         },
         // Trailing whitespace isn't part of a detected file path.
         .{
-            .input = "./spaces-end.   ",
-            .expect = "./spaces-end.",
+            .input = "./spaces-end   ",
+            .expect = "./spaces-end",
+        },
+        // Sentence punctuation after a path isn't part of it.
+        .{
+            .input = "see /private/tmp/scratchpad/icon/all.png.",
+            .expect = "/private/tmp/scratchpad/icon/all.png",
+        },
+        .{
+            .input = "wrote ~/notes/todo.md, then src/config/url.zig; done",
+            .expect = "~/notes/todo.md",
+        },
+        .{
+            .input = "edit src/config/url.zig.",
+            .expect = "src/config/url.zig",
+        },
+        .{
+            .input = "in /tmp/test folder/file.txt.",
+            .expect = "/tmp/test folder/file.txt",
+        },
+        .{
+            .input = "go up ../..",
+            .expect = "../..",
+        },
+        .{
+            .input = "here: ./.",
+            .expect = "./.",
         },
         // File paths with internal spaces
         .{
