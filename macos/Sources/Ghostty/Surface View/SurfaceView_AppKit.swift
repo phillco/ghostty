@@ -1669,6 +1669,11 @@ extension Ghostty {
             // in a row without storing it all.
             var item: NSMenuItem
 
+            if let hoverUrl, !hoverUrl.isEmpty {
+                addLinkItems(to: menu, for: hoverUrl)
+                menu.addItem(.separator())
+            }
+
             // If we have a selection, add copy
             if let text = self.accessibilitySelectedText(), text.count > 0 {
                 menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
@@ -1706,6 +1711,88 @@ extension Ghostty {
             item = menu.addItem(withTitle: "Change Terminal Title...", action: #selector(changeTitle(_:)), keyEquivalent: "")
 
             return menu
+        }
+
+        private func addLinkItems(to menu: NSMenu, for value: String) {
+            var item: NSMenuItem
+            guard let link = LocalFileLink(value, pwd: pwd) else {
+                item = menu.addItem(withTitle: "Open Link", action: #selector(openLinkFromMenu(_:)), keyEquivalent: "")
+                item.representedObject = value
+                item.setImageIfDesired(systemSymbolName: "safari")
+                item = menu.addItem(withTitle: "Copy Link", action: #selector(copyLinkFromMenu(_:)), keyEquivalent: "")
+                item.representedObject = value
+                item.setImageIfDesired(systemSymbolName: "link")
+                return
+            }
+
+            item = menu.addItem(withTitle: "Open", action: #selector(openFileLinkFromMenu(_:)), keyEquivalent: "")
+            item.representedObject = link
+            item = menu.addItem(withTitle: "Open in Editor", action: #selector(openFileLinkInEditorFromMenu(_:)), keyEquivalent: "")
+            item.representedObject = link
+            item.setImageIfDesired(systemSymbolName: "pencil")
+            item = menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealFileLinkFromMenu(_:)), keyEquivalent: "")
+            item.representedObject = link
+            item.setImageIfDesired(systemSymbolName: "folder")
+
+            let defaultApp = NSWorkspace.shared.urlForApplication(toOpen: link.url)
+            var apps = NSWorkspace.shared.urlsForApplications(toOpen: link.url)
+            if let defaultApp {
+                apps = [defaultApp] + apps.filter { $0 != defaultApp }
+            }
+            if !apps.isEmpty {
+                let openWith = NSMenu()
+                for app in apps {
+                    let name = FileManager.default.displayName(atPath: app.path)
+                    let title = app == defaultApp ? "\(name) (default)" : name
+                    let appItem = openWith.addItem(withTitle: title, action: #selector(openFileLinkWithAppFromMenu(_:)), keyEquivalent: "")
+                    appItem.representedObject = [link.url, app]
+                    appItem.target = self
+                    let icon = NSWorkspace.shared.icon(forFile: app.path)
+                    icon.size = NSSize(width: 16, height: 16)
+                    appItem.image = icon
+                }
+                item = menu.addItem(withTitle: "Open With", action: nil, keyEquivalent: "")
+                item.submenu = openWith
+            }
+
+            item = menu.addItem(withTitle: "Copy Path", action: #selector(copyLinkFromMenu(_:)), keyEquivalent: "")
+            item.representedObject = link.url.path
+            item.setImageIfDesired(systemSymbolName: "doc.on.doc")
+        }
+
+        @objc private func openLinkFromMenu(_ sender: NSMenuItem) {
+            guard let value = sender.representedObject as? String, let url = URL(string: value) else { return }
+            switch UntrustedURL(value).decision {
+            case .allow(let url): NSWorkspace.shared.open(url)
+            case .confirm: UntrustedURLAlert.presentConfirmation(for: url, displayString: UntrustedURL(value).displayString)
+            case .deny: NSSound.beep()
+            }
+        }
+
+        @objc private func copyLinkFromMenu(_ sender: NSMenuItem) {
+            guard let value = sender.representedObject as? String else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
+        }
+
+        @objc private func openFileLinkFromMenu(_ sender: NSMenuItem) {
+            guard let link = sender.representedObject as? LocalFileLink else { return }
+            LocalFileLinkOpener.open(link)
+        }
+
+        @objc private func openFileLinkInEditorFromMenu(_ sender: NSMenuItem) {
+            guard let link = sender.representedObject as? LocalFileLink else { return }
+            LocalFileLinkOpener.openInEditor(link)
+        }
+
+        @objc private func revealFileLinkFromMenu(_ sender: NSMenuItem) {
+            guard let link = sender.representedObject as? LocalFileLink else { return }
+            LocalFileLinkOpener.reveal(link)
+        }
+
+        @objc private func openFileLinkWithAppFromMenu(_ sender: NSMenuItem) {
+            guard let pair = sender.representedObject as? [URL], pair.count == 2 else { return }
+            LocalFileLinkOpener.open(pair[0], with: pair[1])
         }
 
         // MARK: Menu Handlers
