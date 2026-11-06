@@ -3,6 +3,12 @@ import AppKit
 /// Presents decisions for untrusted URLs at the AppKit boundary.
 enum UntrustedURLAlert {
     static func presentConfirmation(for url: URL, displayString: String) {
+        // link-confirm-custom-schemes = false opens custom schemes directly.
+        if (NSApp.delegate as? AppDelegate)?.ghostty.config.linkConfirmCustomSchemes == false {
+            _ = NSWorkspace.shared.open(url)
+            return
+        }
+
         deferPresentation {
             let workspace = NSWorkspace.shared
             let handler = workspace.urlForApplication(toOpen: url)
@@ -24,32 +30,6 @@ enum UntrustedURLAlert {
                 // Cancel is deliberately the default action.
                 guard response == .alertSecondButtonReturn else { return }
                 _ = workspace.open(url)
-            }
-        }
-    }
-
-    static func presentBlock(
-        reason: UntrustedURL.DenialReason,
-        displayString: String
-    ) {
-        deferPresentation {
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.icon = NSImage(named: NSImage.cautionName)
-            alert.messageText = "Ghostty Blocked This Link"
-            alert.informativeText = reason.message
-            alert.accessoryView = targetView(displayString)
-            alert.addButton(withTitle: "OK")
-            alert.addButton(withTitle: "Copy Link")
-
-            present(alert) { response in
-                // Keep blocked targets out of Launch Services. Copying the
-                // displayed, sanitized value gives the user an explicit path
-                // forward without adding a one-click policy bypass.
-                guard response == .alertSecondButtonReturn else { return }
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(displayString, forType: .string)
             }
         }
     }

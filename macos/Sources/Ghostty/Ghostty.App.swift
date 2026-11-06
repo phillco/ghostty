@@ -756,7 +756,7 @@ extension Ghostty {
                 checkForUpdates(app)
 
             case GHOSTTY_ACTION_OPEN_URL:
-                return openURL(action.action.open_url)
+                return openURL(action.action.open_url, target: target)
 
             case GHOSTTY_ACTION_UNDO:
                 return undo(app, target: target)
@@ -817,10 +817,30 @@ extension Ghostty {
             }
         }
 
-        private static func openURL(
-            _ v: ghostty_action_open_url_s
+        static func openURL(
+            _ v: ghostty_action_open_url_s,
+            target: ghostty_target_s? = nil
         ) -> Bool {
             let action = Ghostty.Action.OpenURL(c: v)
+
+            // Local paths from terminal output open without prompting: text
+            // and unknown types in the link editor, other files in their
+            // default app, and executables are only revealed in Finder.
+            // Missing files beep instead of raising a blocking alert.
+            if action.kind == .osc8 || action.kind == .unknown {
+                let pwd = action.kind == .unknown ? target.flatMap(Self.surfacePwd) : nil
+                if let link = LocalFileLink(action.url, pwd: pwd) {
+                    LocalFileLinkOpener.open(link)
+                    return true
+                }
+                // Detected links are either scheme URLs from the fixed list
+                // in url.zig or paths, so anything without one of those
+                // schemes is a path that does not exist.
+                if action.kind == .unknown, !Self.hasDetectedURLScheme(action.url) {
+                    NSSound.beep()
+                    return true
+                }
+            }
 
             // OSC 8 targets are producer-controlled terminal output. Keep them
             // out of the unrestricted generic opener so unsafe local files and
@@ -878,6 +898,25 @@ extension Ghostty {
             return true
         }
 
+        private static func hasDetectedURLScheme(_ value: String) -> Bool {
+            guard let scheme = URL(string: value)?.scheme?.lowercased() else { return false }
+            return detectedURLSchemes.contains(scheme)
+        }
+
+        /// The schemes url.zig recognizes, minus "file", which is a path.
+        private static let detectedURLSchemes: Set<String> = [
+            "http", "https", "mailto", "ftp", "ssh", "git", "tel", "magnet",
+            "ipfs", "ipns", "gemini", "gopher", "news",
+        ]
+
+        private static func surfacePwd(_ target: ghostty_target_s) -> String? {
+            guard target.tag == GHOSTTY_TARGET_SURFACE,
+                  let surface = target.target.surface,
+                  let view = surfaceView(from: surface)
+            else { return nil }
+            return view.pwd
+        }
+
         private static func openUntrustedURL(_ value: String) -> Bool {
             let target = UntrustedURL(value)
             switch target.decision {
@@ -891,10 +930,8 @@ extension Ghostty {
                 )
 
             case .deny(let reason):
-                UntrustedURLAlert.presentBlock(
-                    reason: reason,
-                    displayString: target.displayString
-                )
+                Ghostty.logger.info("blocked link: \(reason.message, privacy: .public)")
+                NSSound.beep()
             }
 
             // Always report OSC 8 actions as handled. Returning false would

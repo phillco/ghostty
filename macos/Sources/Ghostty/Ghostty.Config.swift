@@ -340,6 +340,24 @@ extension Ghostty {
             return String(cString: ptr)
         }
 
+        var linkEditor: String? {
+            guard let config = self.config else { return nil }
+            var v: UnsafePointer<Int8>?
+            let key = "link-editor"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return nil }
+            guard let ptr = v else { return nil }
+            let value = String(cString: ptr)
+            return value.isEmpty ? nil : value
+        }
+
+        var linkConfirmCustomSchemes: Bool {
+            guard let config = self.config else { return true }
+            var v = true
+            let key = "link-confirm-custom-schemes"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return v
+        }
+
         var macosWindowButtons: MacOSWindowButtons {
             let defaultValue = MacOSWindowButtons.visible
             guard let config = self.config else { return defaultValue }

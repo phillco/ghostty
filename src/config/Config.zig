@@ -1508,6 +1508,30 @@ link: RepeatableLink = .{},
 /// Available since: 1.2.0
 @"link-previews": LinkPreviews = .true,
 
+/// The editor that opens text files from clicked links on macOS.
+///
+/// Set this to an editor's command-line tool, such as the `subl` binary inside
+/// Sublime Text's app bundle, to open files at the line a link names. The tool
+/// receives `FILE`, or `FILE:LINE[:COLUMN]` when the link ends with a line
+/// number, as compilers and grep print. Set it to an `.app` bundle to open
+/// files in that application without a line number. When unset, files open in
+/// the system's default text editor.
+///
+/// Clicked paths to text files, files of unknown type and links with line
+/// numbers open in this editor. Other files open in their default application.
+/// Executables and application bundles are revealed in Finder instead of
+/// being run.
+@"link-editor": ?[:0]const u8 = null,
+
+/// Ask before opening a link whose scheme is not http, https, mailto or
+/// file. Such links can launch any application registered for the scheme,
+/// so by default a confirmation names the handler first. Set this to false to
+/// open them without asking.
+///
+/// Malformed links and local executables are never opened, regardless of
+/// this setting.
+@"link-confirm-custom-schemes": bool = true,
+
 /// Whether to start the window in a maximized state. This setting applies
 /// to new windows and does not apply to tabs, splits, etc. However, this setting
 /// will apply to all new windows, not just the first one.
