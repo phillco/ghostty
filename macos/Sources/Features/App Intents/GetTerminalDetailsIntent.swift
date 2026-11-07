@@ -37,7 +37,7 @@ struct GetTerminalDetailsIntent: AppIntent {
         case .workingDirectory: return .result(value: terminal.workingDirectory)
         case .allContents:
             guard let view = terminal.surfaceView else { throw GhosttyIntentError.surfaceNotFound }
-            return .result(value: view.cachedScreenContents.get())
+            return .result(value: view.cachedScreen.get().text)
         case .selectedText:
             guard let view = terminal.surfaceView else { throw GhosttyIntentError.surfaceNotFound }
             return .result(value: view.accessibilitySelectedText())

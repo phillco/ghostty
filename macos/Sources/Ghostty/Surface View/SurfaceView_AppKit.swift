@@ -225,8 +225,19 @@ extension Ghostty {
         // by the user, this is set to the prior value (which may be empty, but non-nil).
         private var titleFromTerminal: String?
 
+        /// Screen text plus the cursor and selection read with it, so ranges
+        /// mapped into the text describe the same moment. Kept for about one
+        /// frame: accessibility clients poll this to see output land.
+        struct ScreenSnapshot {
+            var text: String
+            var cursor: ghostty_cursor_position_s?
+            var selection: ghostty_selection_range_s?
+
+            static let empty = ScreenSnapshot(text: "", cursor: nil, selection: nil)
+        }
+
         // The cached contents of the screen.
-        private(set) var cachedScreenContents: CachedValue<String>
+        private(set) var cachedScreen: CachedValue<ScreenSnapshot>
         private(set) var cachedVisibleContents: CachedValue<String>
 
         /// Event monitor (see individual events for why)
@@ -248,8 +259,8 @@ extension Ghostty {
             // We need to initialize this so it does something but we want to set
             // it back up later so we can reference `self`. This is a hack we should
             // fix at some point.
-            self.cachedScreenContents = .init(duration: .milliseconds(500)) { "" }
-            self.cachedVisibleContents = self.cachedScreenContents
+            self.cachedScreen = .init(duration: .milliseconds(16)) { .empty }
+            self.cachedVisibleContents = .init(duration: .milliseconds(16)) { "" }
 
             // Initialize with some default frame size. The important thing is that this
             // is non-zero so that our layer bounds are non-zero so that our renderer
@@ -257,9 +268,9 @@ extension Ghostty {
             super.init(id: uuid, frame: NSRect(x: 0, y: 0, width: 800, height: 600))
 
             // Our cache of screen data
-            cachedScreenContents = .init(duration: .milliseconds(500)) { [weak self] in
-                guard let self else { return "" }
-                guard let surface = self.surface else { return "" }
+            cachedScreen = .init(duration: .milliseconds(16)) { [weak self] in
+                guard let self else { return .empty }
+                guard let surface = self.surface else { return .empty }
                 var text = ghostty_text_s()
                 let sel = ghostty_selection_s(
                     top_left: ghostty_point_s(
@@ -273,11 +284,19 @@ extension Ghostty {
                         x: 0,
                         y: 0),
                     rectangle: false)
-                guard ghostty_surface_read_text(surface, sel, &text) else { return "" }
+                guard ghostty_surface_read_text(surface, sel, &text) else { return .empty }
                 defer { ghostty_surface_free_text(surface, &text) }
-                return String(cString: text.text)
+
+                var cursor = ghostty_cursor_position_s()
+                let hasCursor = ghostty_surface_cursor_position(surface, &cursor)
+                var selection = ghostty_selection_range_s()
+                let hasSelection = ghostty_surface_selection_range(surface, &selection)
+                return ScreenSnapshot(
+                    text: String(cString: text.text),
+                    cursor: hasCursor ? cursor : nil,
+                    selection: hasSelection ? selection : nil)
             }
-            cachedVisibleContents = .init(duration: .milliseconds(500)) { [weak self] in
+            cachedVisibleContents = .init(duration: .milliseconds(16)) { [weak self] in
                 guard let self else { return "" }
                 guard let surface = self.surface else { return "" }
                 var text = ghostty_text_s()
@@ -528,18 +547,16 @@ extension Ghostty {
         }
 
         private func postAccessibilityNotificationsIfNeeded() {
-            guard let surface = self.surface else { return }
+            guard self.surface != nil else { return }
             guard focused else { return }
 
-            var cursorPos = ghostty_cursor_position_s()
-            let hasCursorPos = ghostty_surface_cursor_position(surface, &cursorPos)
-
-            let content = cachedScreenContents.get()
+            let snapshot = cachedScreen.get()
+            let content = snapshot.text
             let valueFingerprint = content.utf16.count ^ content.hashValue
 
             // Selection changes are reported by upstream's debounced event path.
             // Keep polling only for caret motion and screen text updates.
-            if hasCursorPos, let prior = lastAccessibilityCursorPosition,
+            if let cursorPos = snapshot.cursor, let prior = lastAccessibilityCursorPosition,
                prior.row != cursorPos.row || prior.col != cursorPos.col {
                 NSAccessibility.post(element: self, notification: .selectedTextChanged)
             }
@@ -548,7 +565,7 @@ extension Ghostty {
                 NSAccessibility.post(element: self, notification: .valueChanged)
             }
 
-            lastAccessibilityCursorPosition = hasCursorPos ? cursorPos : nil
+            lastAccessibilityCursorPosition = snapshot.cursor
             lastAccessibilityValueFingerprint = valueFingerprint
         }
 
@@ -2531,19 +2548,19 @@ extension Ghostty.SurfaceView {
 
     @objc(accessibilityValue)
     func accessibilityValue() -> String? {
-        return cachedScreenContents.get()
+        return cachedScreen.get().text
     }
 
     /// Returns the range of text that is currently selected in the terminal.
     /// This allows VoiceOver and other assistive technologies to understand
     /// what text the user has selected.
     override func accessibilitySelectedTextRange() -> NSRange {
-        guard let surface = self.surface else { return NSRange() }
+        guard self.surface != nil else { return NSRange() }
 
-        var selectionRange = ghostty_selection_range_s()
-        let content = cachedScreenContents.get()
+        let snapshot = cachedScreen.get()
+        let content = snapshot.text
 
-        if ghostty_surface_selection_range(surface, &selectionRange) {
+        if let selectionRange = snapshot.selection {
             return nsRangeFromUTF8Offsets(
                 location: Int(selectionRange.location),
                 length: Int(selectionRange.length),
@@ -2553,8 +2570,7 @@ extension Ghostty.SurfaceView {
 
         // No selection: expose a zero-length range at the caret so assistive
         // technologies can announce the actual insertion point.
-        var cursorPos = ghostty_cursor_position_s()
-        guard ghostty_surface_cursor_position(surface, &cursorPos) else { return NSRange() }
+        guard let cursorPos = snapshot.cursor else { return NSRange() }
 
         let lineRange = utf16Range(forLine: Int(cursorPos.row), in: content)
         guard lineRange.location != NSNotFound else {
@@ -2583,21 +2599,21 @@ extension Ghostty.SurfaceView {
     /// Returns the number of characters in the terminal content.
     /// This helps assistive technologies understand the size of the content.
     override func accessibilityNumberOfCharacters() -> Int {
-        let content = cachedScreenContents.get()
+        let content = cachedScreen.get().text
         return content.utf16.count
     }
 
     /// Returns the visible character range for the terminal.
     /// For terminals, we typically show all content as visible.
     override func accessibilityVisibleCharacterRange() -> NSRange {
-        let content = cachedScreenContents.get()
+        let content = cachedScreen.get().text
         return NSRange(location: 0, length: content.utf16.count)
     }
 
     /// Returns the line number for a given character index.
     /// This helps assistive technologies navigate by line.
     override func accessibilityLine(for index: Int) -> Int {
-        let content = cachedScreenContents.get()
+        let content = cachedScreen.get().text
         let clampedIndex = max(0, min(index, content.utf16.count))
         let endIndex = String.Index(utf16Offset: clampedIndex, in: content)
         let substring = String(content[..<endIndex])
@@ -2606,14 +2622,14 @@ extension Ghostty.SurfaceView {
 
     /// Returns the character range for a given line number.
     override func accessibilityRange(forLine lineNumber: Int) -> NSRange {
-        let content = cachedScreenContents.get()
+        let content = cachedScreen.get().text
         return utf16Range(forLine: lineNumber, in: content)
     }
 
     /// Returns a substring for the given range.
     /// This allows assistive technologies to read specific portions of the content.
     override func accessibilityString(for range: NSRange) -> String? {
-        let content = cachedScreenContents.get()
+        let content = cachedScreen.get().text
         guard let swiftRange = Range(range, in: content) else { return nil }
         return String(content[swiftRange])
     }
@@ -2645,7 +2661,7 @@ extension Ghostty.SurfaceView {
     override func accessibilityFrame(for range: NSRange) -> NSRect {
         guard self.surface != nil else { return NSMakeRect(frame.origin.x, frame.origin.y, 0, 0) }
 
-        let content = cachedScreenContents.get()
+        let content = cachedScreen.get().text
         let clampedRange = clampedUTF16Range(range, in: content)
         guard let origin = gridOrigin() else {
             return NSMakeRect(frame.origin.x, frame.origin.y, 0, 0)
@@ -2701,7 +2717,7 @@ extension Ghostty.SurfaceView {
 
     override func setAccessibilitySelectedTextRange(_ range: NSRange) {
         guard let surface = self.surface else { return }
-        let content = cachedScreenContents.get()
+        let content = cachedScreen.get().text
 
         guard let offsets = utf8Offsets(from: range, in: content) else { return }
         _ = ghostty_surface_set_selection_range(
