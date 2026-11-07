@@ -225,17 +225,27 @@ extension Ghostty {
         // by the user, this is set to the prior value (which may be empty, but non-nil).
         private var titleFromTerminal: String?
 
-        /// Screen text plus the cursor and selection read right after it, so
-        /// accessibility ranges map into one cached text. Each is a separate
-        /// core read, so output landing between them can skew them until the
-        /// next refresh. Kept for about one frame: clients poll this to see
-        /// output land.
+        /// Screen text with the cursor, selection and viewport cells mapped
+        /// into it, all from one core read under one lock, so they describe
+        /// the same moment. Kept for about one frame: clients poll this to
+        /// see output land.
         struct ScreenSnapshot {
             var text: String
+            /// The cursor in active-area cells, to spot caret motion.
             var cursor: ghostty_cursor_position_s?
-            var selection: ghostty_selection_range_s?
+            /// The selection, or a zero-length range at the caret (UTF-16).
+            var selectedRange: NSRange
+            /// The caret's UTF-16 offset into text.
+            var caretLocation: Int
+            /// The cursor's viewport cell, when it is on screen.
+            var cursorViewport: ghostty_cursor_position_s?
+            /// The viewport cell of each UTF-8 byte of text from viewportOffset on.
+            var viewportOffset: Int
+            var cells: [ghostty_viewport_cell_s]
 
-            static let empty = ScreenSnapshot(text: "", cursor: nil, selection: nil)
+            static let empty = ScreenSnapshot(
+                text: "", cursor: nil, selectedRange: NSRange(), caretLocation: 0,
+                cursorViewport: nil, viewportOffset: 0, cells: [])
         }
 
         // The cached contents of the screen.
@@ -273,30 +283,27 @@ extension Ghostty {
             cachedScreen = .init(duration: .milliseconds(16)) { [weak self] in
                 guard let self else { return .empty }
                 guard let surface = self.surface else { return .empty }
-                var text = ghostty_text_s()
-                let sel = ghostty_selection_s(
-                    top_left: ghostty_point_s(
-                        tag: GHOSTTY_POINT_SCREEN,
-                        coord: GHOSTTY_POINT_COORD_TOP_LEFT,
-                        x: 0,
-                        y: 0),
-                    bottom_right: ghostty_point_s(
-                        tag: GHOSTTY_POINT_SCREEN,
-                        coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT,
-                        x: 0,
-                        y: 0),
-                    rectangle: false)
-                guard ghostty_surface_read_text(surface, sel, &text) else { return .empty }
-                defer { ghostty_surface_free_text(surface, &text) }
+                var screen = ghostty_screen_text_s()
+                guard ghostty_surface_read_screen_text(surface, &screen) else { return .empty }
+                defer { ghostty_surface_free_screen_text(surface, &screen) }
 
-                var cursor = ghostty_cursor_position_s()
-                let hasCursor = ghostty_surface_cursor_position(surface, &cursor)
-                var selection = ghostty_selection_range_s()
-                let hasSelection = ghostty_surface_selection_range(surface, &selection)
+                let text = String(cString: screen.text)
+                let caret = self.nsRangeFromUTF8Offsets(
+                    location: Int(screen.cursor_offset), length: 0, in: text)
+                let selectedRange = screen.has_selection
+                    ? self.nsRangeFromUTF8Offsets(
+                        location: Int(screen.selection.location),
+                        length: Int(screen.selection.length),
+                        in: text)
+                    : caret
                 return ScreenSnapshot(
-                    text: String(cString: text.text),
-                    cursor: hasCursor ? cursor : nil,
-                    selection: hasSelection ? selection : nil)
+                    text: text,
+                    cursor: screen.cursor,
+                    selectedRange: selectedRange,
+                    caretLocation: caret.location,
+                    cursorViewport: screen.cursor_in_viewport ? screen.cursor_viewport : nil,
+                    viewportOffset: Int(screen.viewport_offset),
+                    cells: Array(UnsafeBufferPointer(start: screen.cells, count: Int(screen.cells_len))))
             }
             cachedVisibleContents = .init(duration: .milliseconds(16)) { [weak self] in
                 guard let self else { return "" }
@@ -2564,29 +2571,9 @@ extension Ghostty.SurfaceView {
     override func accessibilitySelectedTextRange() -> NSRange {
         guard self.surface != nil else { return NSRange() }
 
-        let snapshot = cachedScreen.get()
-        let content = snapshot.text
-
-        if let selectionRange = snapshot.selection {
-            return nsRangeFromUTF8Offsets(
-                location: Int(selectionRange.location),
-                length: Int(selectionRange.length),
-                in: content
-            )
-        }
-
-        // No selection: expose a zero-length range at the caret so assistive
-        // technologies can announce the actual insertion point.
-        guard let cursorPos = snapshot.cursor else { return NSRange() }
-
-        let lineRange = utf16Range(forLine: Int(cursorPos.row), in: content)
-        guard lineRange.location != NSNotFound else {
-            return NSRange(location: content.utf16.count, length: 0)
-        }
-
-        let col = max(0, Int(cursorPos.col))
-        let location = lineRange.location + min(col, lineRange.length)
-        return NSRange(location: location, length: 0)
+        // With no selection this is a zero-length range at the caret, so
+        // assistive technologies can announce the actual insertion point.
+        return cachedScreen.get().selectedRange
     }
 
     /// Returns the currently selected text as a string.
@@ -2665,61 +2652,102 @@ extension Ghostty.SurfaceView {
     }
 
     /// Returns the bounds of the given text range in screen coordinates.
+    /// Ranges outside the viewport are clipped to it, or get an empty rect.
     override func accessibilityFrame(for range: NSRange) -> NSRect {
-        guard self.surface != nil else { return NSMakeRect(frame.origin.x, frame.origin.y, 0, 0) }
+        let emptyRect = NSRect(origin: frame.origin, size: .zero)
+        guard self.surface != nil else { return emptyRect }
 
-        let content = cachedScreen.get().text
+        let snapshot = cachedScreen.get()
+        let content = snapshot.text
         let clampedRange = clampedUTF16Range(range, in: content)
-        guard let origin = gridOrigin() else {
-            return NSMakeRect(frame.origin.x, frame.origin.y, 0, 0)
-        }
+        guard let origin = gridOrigin() else { return emptyRect }
 
         let columns = Int(surfaceSize?.columns ?? 0)
-        let positions = utf16LineColumns(for: clampedRange, in: content, columns: columns)
         let cellWidth = Double(cellSize.width)
         let cellHeight = Double(cellSize.height)
-        guard cellWidth > 0, cellHeight > 0 else { return NSMakeRect(frame.origin.x, frame.origin.y, 0, 0) }
+        guard cellWidth > 0, cellHeight > 0 else { return emptyRect }
 
-        let startLine = positions.startLine
-        let startCol = positions.startCol
-        let endLine = positions.endLine
-        let endCol = positions.endCol
+        // Rows and columns come from the core's map of the text.
+        guard let cells = viewportCells(for: clampedRange, in: snapshot) else { return emptyRect }
 
-        var x = origin.x
-        var y = origin.y
-        var width = 0.0
+        let x: Double
+        let y = origin.y + (Double(cells.startRow) * cellHeight)
+        let width: Double
         var height = cellHeight
-
-        if clampedRange.length == 0 {
-            x = origin.x + (Double(startCol) * cellWidth)
-            y = origin.y + (Double(startLine) * cellHeight)
-            width = 0
-        } else if startLine == endLine {
-            let colStart = min(startCol, endCol)
-            let colEnd = max(startCol, endCol)
-            x = origin.x + (Double(colStart) * cellWidth)
-            y = origin.y + (Double(startLine) * cellHeight)
-            width = max(0, Double(colEnd - colStart) * cellWidth)
+        if cells.startRow == cells.endRow {
+            x = origin.x + (Double(cells.startCol) * cellWidth)
+            width = max(0, Double(cells.endCol - cells.startCol) * cellWidth)
         } else {
-            let minLine = min(startLine, endLine)
-            let maxLine = max(startLine, endLine)
             x = origin.x
-            y = origin.y + (Double(minLine) * cellHeight)
-            height = Double(maxLine - minLine + 1) * cellHeight
-
-            let widthCols = columns > 0 ? columns : max(startCol, endCol)
-            width = Double(widthCols) * cellWidth
+            height = Double(cells.endRow - cells.startRow + 1) * cellHeight
+            width = Double(columns > 0 ? columns : max(cells.startCol, cells.endCol)) * cellWidth
         }
 
-        let viewRect = NSMakeRect(
-            x,
-            frame.size.height - (y + height),
-            width,
-            height)
+        let viewRect = NSRect(
+            x: x,
+            y: frame.size.height - (y + height),
+            width: width,
+            height: height)
 
         let winRect = self.convert(viewRect, to: nil)
         guard let window = self.window else { return winRect }
         return window.convertToScreen(winRect)
+    }
+
+    /// Viewport rows and columns in cells; the end column is exclusive.
+    private struct CellSpan {
+        var startRow: Int
+        var startCol: Int
+        var endRow: Int
+        var endCol: Int
+
+        init(row: Int, col: Int) {
+            self.init(startRow: row, startCol: col, endRow: row, endCol: col)
+        }
+
+        init(startRow: Int, startCol: Int, endRow: Int, endCol: Int) {
+            self.startRow = startRow
+            self.startCol = startCol
+            self.endRow = endRow
+            self.endCol = endCol
+        }
+    }
+
+    /// The viewport cells a UTF-16 range covers, clipped to the viewport, or
+    /// nil when none of it is on screen. The caret comes straight from the
+    /// cursor's cell, since text can end before it.
+    private func viewportCells(
+        for range: NSRange,
+        in snapshot: ScreenSnapshot
+    ) -> CellSpan? {
+        if range.length == 0, range.location == snapshot.caretLocation,
+           let cursor = snapshot.cursorViewport {
+            return CellSpan(row: Int(cursor.row), col: Int(cursor.col))
+        }
+
+        guard let offsets = utf8Offsets(from: range, in: snapshot.text) else { return nil }
+        let cells = snapshot.cells
+        let start = offsets.location - snapshot.viewportOffset
+        let end = start + offsets.length
+
+        if offsets.length == 0 {
+            // An offset just past the last visible byte sits after its cell.
+            if cells.indices.contains(start) {
+                let cell = cells[start]
+                return CellSpan(row: Int(cell.row), col: Int(cell.col))
+            }
+            guard start == cells.count, let last = cells.last else { return nil }
+            return CellSpan(row: Int(last.row), col: Int(last.col) + Int(last.width))
+        }
+
+        let first = max(start, 0)
+        let last = min(end, cells.count) - 1
+        guard first <= last else { return nil }
+        let a = cells[first]
+        let b = cells[last]
+        return CellSpan(
+            startRow: Int(a.row), startCol: Int(a.col),
+            endRow: Int(b.row), endCol: Int(b.col) + Int(b.width))
     }
 
     override func setAccessibilitySelectedTextRange(_ range: NSRange) {
@@ -2871,67 +2899,6 @@ extension Ghostty.SurfaceView {
         let location = max(0, min(range.location, total))
         let end = max(location, min(range.location + range.length, total))
         return NSRange(location: location, length: end - location)
-    }
-
-    private func utf16LineColumns(
-        for range: NSRange,
-        in content: String,
-        columns: Int
-    ) -> (startLine: Int, startCol: Int, endLine: Int, endCol: Int) {
-        let startOffset = range.location
-        let endOffset = range.location + range.length
-
-        var line = 0
-        var col = 0
-        var index = 0
-
-        var startLine = 0
-        var startCol = 0
-        var endLine = 0
-        var endCol = 0
-        var hasStart = false
-        var hasEnd = false
-
-        for unit in content.utf16 {
-            // Soft-wrap only when a character needs the next cell. Wrapping
-            // eagerly after a full row would count a row twice when a "\n"
-            // follows it (a full-width line), shifting every later row down.
-            if unit != 10, columns > 0, col >= columns {
-                line += 1
-                col = 0
-            }
-
-            if !hasStart, index == startOffset {
-                startLine = line
-                startCol = col
-                hasStart = true
-            }
-            if !hasEnd, index == endOffset {
-                endLine = line
-                endCol = col
-                hasEnd = true
-                break
-            }
-
-            if unit == 10 { // "\n"
-                line += 1
-                col = 0
-            } else {
-                col += 1
-            }
-            index += 1
-        }
-
-        if !hasStart {
-            startLine = line
-            startCol = col
-        }
-        if !hasEnd {
-            endLine = line
-            endCol = col
-        }
-
-        return (startLine, startCol, endLine, endCol)
     }
 
     private func utf16Range(
