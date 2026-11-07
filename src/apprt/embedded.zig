@@ -2069,7 +2069,12 @@ pub const CAPI = struct {
             .{ .row = pt.coord().y, .col = pt.coord().x }
         else
             .{ .row = @intCast(screen.cursor.y), .col = @intCast(screen.cursor.x) };
-        const viewport = screen.pages.pointFromPin(.viewport, cursor_pin);
+        // pointFromPin only rejects pins above the viewport, so a cursor
+        // below it when scrolled back needs the row check.
+        const viewport: ?terminal.Point = if (screen.pages.pointFromPin(.viewport, cursor_pin)) |pt|
+            if (pt.coord().y < screen.pages.rows) pt else null
+        else
+            null;
         const selection: ?terminal.StringMap.ByteRange = if (screen.selection) |sel|
             map.rangeForSelection(screen, sel)
         else
