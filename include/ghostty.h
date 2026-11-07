@@ -466,6 +466,31 @@ typedef struct {
   uint32_t col;
 } ghostty_cursor_position_s;
 
+// Where a byte of screen text is drawn in the viewport. A newline sits on
+// the row it ends, just after that row's last cell, with zero width.
+typedef struct {
+  uint16_t row;
+  uint16_t col;
+  uint16_t width;
+} ghostty_viewport_cell_s;
+
+// The active screen's text with soft wraps joined, read under one lock with
+// the cursor and selection. Offsets are UTF-8 bytes into text. cells holds
+// the viewport cell of each byte from viewport_offset on.
+typedef struct {
+  const char* text;
+  uintptr_t text_len;
+  ghostty_cursor_position_s cursor;
+  uint32_t cursor_offset;
+  bool cursor_in_viewport;
+  ghostty_cursor_position_s cursor_viewport;
+  bool has_selection;
+  ghostty_selection_range_s selection;
+  uint32_t viewport_offset;
+  const ghostty_viewport_cell_s* cells;
+  uintptr_t cells_len;
+} ghostty_screen_text_s;
+
 typedef enum {
   GHOSTTY_POINT_ACTIVE,
   GHOSTTY_POINT_VIEWPORT,
@@ -1264,6 +1289,10 @@ GHOSTTY_API bool ghostty_surface_read_text(ghostty_surface_t,
 GHOSTTY_API bool ghostty_surface_read_scrollback(ghostty_surface_t,
                                                ghostty_text_s*);
 GHOSTTY_API void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
+GHOSTTY_API bool ghostty_surface_read_screen_text(ghostty_surface_t,
+                                                 ghostty_screen_text_s*);
+GHOSTTY_API void ghostty_surface_free_screen_text(ghostty_surface_t,
+                                                 ghostty_screen_text_s*);
 GHOSTTY_API bool ghostty_surface_cursor_position(ghostty_surface_t,
                                                ghostty_cursor_position_s*);
 

@@ -1626,6 +1626,28 @@ pub const CAPI = struct {
         col: u32,
     };
 
+    // ghostty_screen_text_s
+    const ScreenText = extern struct {
+        text: ?[*:0]const u8,
+        text_len: usize,
+        cursor: CursorPosition,
+        cursor_offset: u32,
+        cursor_in_viewport: bool,
+        cursor_viewport: CursorPosition,
+        has_selection: bool,
+        selection: SelectionRange,
+        viewport_offset: u32,
+        cells: ?[*]const terminal.StringMap.ViewportCell,
+        cells_len: usize,
+
+        pub fn deinit(self: *ScreenText) void {
+            const alloc = global.alloc();
+            if (self.text) |ptr| alloc.free(ptr[0..self.text_len :0]);
+            if (self.cells) |ptr| alloc.free(ptr[0..self.cells_len]);
+            self.* = std.mem.zeroes(ScreenText);
+        }
+    };
+
     // ghostty_point_s
     const Point = extern struct {
         tag: Tag,
@@ -1996,6 +2018,86 @@ pub const CAPI = struct {
             };
         }
         return true;
+    }
+
+    /// Read the whole active screen as text with soft wraps joined, along
+    /// with the cursor, the selection and the viewport cell of each visible
+    /// byte, all under one lock so they describe the same moment. Offsets
+    /// are UTF-8 bytes into the text. Free with ghostty_surface_free_screen_text.
+    export fn ghostty_surface_read_screen_text(
+        surface: *Surface,
+        result: *ScreenText,
+    ) bool {
+        const core_surface = &surface.core_surface;
+        core_surface.renderer_state.mutex.lockUncancelable(global.io());
+        defer core_surface.renderer_state.mutex.unlock(global.io());
+
+        readScreenTextLocked(
+            global.alloc(),
+            core_surface.renderer_state.terminal.screens.active,
+            result,
+        ) catch |err| {
+            log.warn("error reading screen text err={}", .{err});
+            return false;
+        };
+        return true;
+    }
+
+    fn readScreenTextLocked(
+        alloc: Allocator,
+        screen: *terminal.Screen,
+        result: *ScreenText,
+    ) !void {
+        const map = try screen.selectionStringMap(alloc, .{
+            .sel = .init(
+                screen.pages.getTopLeft(.screen),
+                screen.pages.getBottomRight(.screen) orelse return error.EmptyScreen,
+                false,
+            ),
+            .trim = false,
+        });
+        // The text goes to the caller; only the pin map is ours to free.
+        errdefer alloc.free(map.string);
+        defer {
+            var pins = map.map;
+            pins.deinit(alloc);
+        }
+
+        const cursor_pin = screen.cursor.page_pin.*;
+        const lay = try map.layout(alloc, screen, cursor_pin);
+        const active: CursorPosition = if (screen.pages.pointFromPin(.active, cursor_pin)) |pt|
+            .{ .row = pt.coord().y, .col = pt.coord().x }
+        else
+            .{ .row = @intCast(screen.cursor.y), .col = @intCast(screen.cursor.x) };
+        const viewport = screen.pages.pointFromPin(.viewport, cursor_pin);
+        const selection: ?terminal.StringMap.ByteRange = if (screen.selection) |sel|
+            map.rangeForSelection(screen, sel)
+        else
+            null;
+
+        result.* = .{
+            .text = map.string.ptr,
+            .text_len = map.string.len,
+            .cursor = active,
+            .cursor_offset = @intCast(lay.cursor),
+            .cursor_in_viewport = viewport != null,
+            .cursor_viewport = if (viewport) |pt|
+                .{ .row = pt.coord().y, .col = pt.coord().x }
+            else
+                .{ .row = 0, .col = 0 },
+            .has_selection = selection != null,
+            .selection = if (selection) |r|
+                .{ .location = @intCast(r.start), .length = @intCast(r.len) }
+            else
+                .{ .location = 0, .length = 0 },
+            .viewport_offset = @intCast(lay.viewport_start),
+            .cells = lay.viewport.ptr,
+            .cells_len = lay.viewport.len,
+        };
+    }
+
+    export fn ghostty_surface_free_screen_text(_: *Surface, ptr: *ScreenText) void {
+        ptr.deinit();
     }
 
     /// Read some arbitrary text from the surface.
