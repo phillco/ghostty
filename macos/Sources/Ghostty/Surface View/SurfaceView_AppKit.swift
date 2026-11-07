@@ -409,7 +409,12 @@ extension Ghostty {
             ) { [weak self] event in self?.localEventHandler(event) }
 
             // Setup our surface. This will also initialize all the terminal IO.
-            let surface_cfg = baseConfig ?? SurfaceConfiguration()
+            var surface_cfg = baseConfig ?? SurfaceConfiguration()
+
+            // Expose the view UUID, which window restoration preserves, so
+            // programs can key state to this surface across app relaunches.
+            surface_cfg.environmentVariables["GHOSTTY_SURFACE_UUID"] = self.id.uuidString
+
             let surface = surface_cfg.withCValue(view: self) { surface_cfg_c in
                 ghostty_surface_new(app, &surface_cfg_c)
             }
