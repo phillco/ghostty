@@ -225,9 +225,11 @@ extension Ghostty {
         // by the user, this is set to the prior value (which may be empty, but non-nil).
         private var titleFromTerminal: String?
 
-        /// Screen text plus the cursor and selection read with it, so ranges
-        /// mapped into the text describe the same moment. Kept for about one
-        /// frame: accessibility clients poll this to see output land.
+        /// Screen text plus the cursor and selection read right after it, so
+        /// accessibility ranges map into one cached text. Each is a separate
+        /// core read, so output landing between them can skew them until the
+        /// next refresh. Kept for about one frame: clients poll this to see
+        /// output land.
         struct ScreenSnapshot {
             var text: String
             var cursor: ghostty_cursor_position_s?
