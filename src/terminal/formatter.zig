@@ -2050,7 +2050,8 @@ pub const PageFormatter = struct {
     /// Append the point map entries for a run of `count` blank cells
     /// that are materialized as spaces just before the cell at (x, y).
     /// Blank cells can span multiple rows if they carry over from wrap
-    /// continuation, so this walks backwards from (x, y).
+    /// continuation, so this walks backwards from (x, y), filling the
+    /// points from the last one so they come out in screen order.
     fn appendBlankPoints(
         self: *const PageFormatter,
         map: *const PointMap,
@@ -2058,7 +2059,7 @@ pub const PageFormatter = struct {
         x: size.CellCountInt,
         y: size.CellCountInt,
     ) std.Io.Writer.Error!void {
-        map.map.ensureUnusedCapacity(
+        const points = map.map.addManyAsSlice(
             map.alloc,
             count,
         ) catch return error.WriteFailed;
@@ -2080,7 +2081,7 @@ pub const PageFormatter = struct {
                 blank_y = 0;
             }
 
-            map.map.appendAssumeCapacity(.{ .x = blank_x, .y = blank_y });
+            points[remaining - 1] = .{ .x = blank_x, .y = blank_y };
         }
     }
 

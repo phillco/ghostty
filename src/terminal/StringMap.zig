@@ -639,3 +639,22 @@ test "StringMap layout scrollback" {
     try testing.expectEqual(ViewportCell{ .row = 0, .col = 2, .width = 0 }, lay.viewport[2]);
     try testing.expectEqual(ViewportCell{ .row = 2, .col = 1, .width = 1 }, lay.viewport[7]);
 }
+
+test "StringMap layout cursor-made gap" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var s = try Screen.init(testing.io, alloc, .{ .cols = 10, .rows = 3, .max_scrollback_bytes = 0 });
+    defer s.deinit();
+    try s.testWriteString("a");
+    s.cursorRight(2);
+    try s.testWriteString("b");
+
+    const map, const lay = try testLayout(&s, 2, 0);
+    defer map.deinit(alloc);
+    defer lay.deinit(alloc);
+    try testing.expectEqualStrings("a  b", map.string);
+    try testing.expectEqual(2, lay.cursor);
+    for (0..4) |i| {
+        try testing.expectEqual(ViewportCell{ .row = 0, .col = @intCast(i), .width = 1 }, lay.viewport[i]);
+    }
+}
