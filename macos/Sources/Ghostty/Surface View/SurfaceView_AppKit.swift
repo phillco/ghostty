@@ -2893,6 +2893,14 @@ extension Ghostty.SurfaceView {
         var hasEnd = false
 
         for unit in content.utf16 {
+            // Soft-wrap only when a character needs the next cell. Wrapping
+            // eagerly after a full row would count a row twice when a "\n"
+            // follows it (a full-width line), shifting every later row down.
+            if unit != 10, columns > 0, col >= columns {
+                line += 1
+                col = 0
+            }
+
             if !hasStart, index == startOffset {
                 startLine = line
                 startCol = col
@@ -2910,10 +2918,6 @@ extension Ghostty.SurfaceView {
                 col = 0
             } else {
                 col += 1
-                if columns > 0, col >= columns {
-                    line += 1
-                    col = 0
-                }
             }
             index += 1
         }
