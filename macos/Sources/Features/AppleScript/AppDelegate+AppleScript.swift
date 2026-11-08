@@ -165,7 +165,9 @@ extension NSApplication {
     /// Required selector name from the command in `sdef`:
     /// `handleNewWindowScriptCommand:`.
     ///
-    /// Accepts an optional reusable surface configuration object.
+    /// Accepts an optional reusable surface configuration object and an
+    /// optional `in background` flag that orders the window behind the others
+    /// without activating the app.
     ///
     /// Returns the newly created scripting window object.
     @objc(handleNewWindowScriptCommand:)
@@ -193,7 +195,8 @@ extension NSApplication {
 
         let controller = TerminalController.newWindow(
             appDelegate.ghostty,
-            withBaseConfig: baseConfig
+            withBaseConfig: baseConfig,
+            background: command.evaluatedArguments?["background"] as? Bool ?? false
         )
         let createdWindowID = ScriptWindow.stableID(primaryController: controller)
 
@@ -221,7 +224,9 @@ extension NSApplication {
     /// Required selector name from the command in `sdef`:
     /// `handleNewTabScriptCommand:`.
     ///
-    /// Accepts an optional target window and optional surface configuration.
+    /// Accepts an optional target window, optional surface configuration and an
+    /// optional `in background` flag that leaves tab selection and app
+    /// activation unchanged.
     /// If no window is provided, this mirrors App Intents and uses the
     /// preferred parent window.
     ///
@@ -266,7 +271,8 @@ extension NSApplication {
         guard let createdController = TerminalController.newTab(
             appDelegate.ghostty,
             from: parentWindow,
-            withBaseConfig: baseConfig
+            withBaseConfig: baseConfig,
+            background: command.evaluatedArguments?["background"] as? Bool ?? false
         ) else {
             command.scriptErrorNumber = errAEEventFailed
             command.scriptErrorString = "Failed to create tab."

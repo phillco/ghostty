@@ -211,6 +211,9 @@
       <parameter name="with configuration" code="GNwS" type="surface configuration" optional="yes" description="Base surface configuration for the initial terminal.">
         <cocoa key="configuration"/>
       </parameter>
+      <parameter name="in background" code="GNwB" type="boolean" optional="yes" description="Open the window behind the others without activating Ghostty. Default: false.">
+        <cocoa key="background"/>
+      </parameter>
       <result type="window" description="The newly created window."/>
     </command>
 
@@ -220,6 +223,9 @@
       </parameter>
       <parameter name="with configuration" code="GNtS" type="surface configuration" optional="yes" description="Base surface configuration for the initial terminal.">
         <cocoa key="configuration"/>
+      </parameter>
+      <parameter name="in background" code="GNtB" type="boolean" optional="yes" description="Create the tab without selecting it or activating Ghostty. Default: false.">
+        <cocoa key="background"/>
       </parameter>
       <result type="tab" description="The newly created tab."/>
     </command>
