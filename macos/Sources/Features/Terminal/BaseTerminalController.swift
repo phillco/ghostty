@@ -408,6 +408,28 @@ class BaseTerminalController: NSWindowController,
         }
     }
 
+    /// Select a surface's tab and make it the window's focused surface without
+    /// activating the app or making the window key. The window is ordered just
+    /// above Ghostty's own frontmost window, so it never rises above another
+    /// app's windows that were already in front of Ghostty.
+    func focusSurfaceInBackground(_ view: Ghostty.SurfaceView) {
+        guard surfaceTree.contains(view) else { return }
+
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            if let group = window.tabGroup, group.selectedWindow !== window {
+                group.selectedWindow = window
+            }
+            // A hidden quick terminal or minimized window stays hidden.
+            if window.isVisible, let front = NSApp.orderedWindows.first(where: {
+                $0.isVisible && $0.windowController is BaseTerminalController
+            }), front !== window, front.tabGroup == nil || front.tabGroup !== window.tabGroup {
+                window.order(.above, relativeTo: front.windowNumber)
+            }
+            window.makeFirstResponder(view)
+        }
+    }
+
     /// Called when the surfaceTree variable changed.
     ///
     /// Subclasses should call super first.

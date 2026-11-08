@@ -236,6 +236,9 @@ final class ScriptTerminal: NSObject {
     }
 
     /// Handler for `focus <terminal>`.
+    ///
+    /// With `in background`, selects the terminal's tab and focuses it within
+    /// its window without activating Ghostty or bringing the window forward.
     @objc(handleFocusCommand:)
     func handleFocus(_ command: NSScriptCommand) -> Any? {
         guard NSApp.validateScript(command: command) else { return nil }
@@ -252,7 +255,11 @@ final class ScriptTerminal: NSObject {
             return nil
         }
 
-        controller.focusSurface(surfaceView)
+        if command.evaluatedArguments?["background"] as? Bool ?? false {
+            controller.focusSurfaceInBackground(surfaceView)
+        } else {
+            controller.focusSurface(surfaceView)
+        }
         return nil
     }
 

@@ -243,6 +243,9 @@
 
     <command name="focus" code="GhstFcus" description="Focus a terminal, bringing its window to the front.">
       <direct-parameter type="specifier" description="The terminal to focus."/>
+      <parameter name="in background" code="GFcB" type="boolean" optional="yes" description="Select the terminal's tab and focus it within its window without activating Ghostty or raising the window above other apps. Default: false.">
+        <cocoa key="background"/>
+      </parameter>
     </command>
 
     <command name="close" code="GhstClos" description="Close a terminal.">
