@@ -16,6 +16,7 @@ import GhosttyKit
 /// - `property pid` -> `@objc(pid)` getter below.
 /// - `property tty` -> `@objc(tty)` getter below.
 /// - `property scrollback text` -> `@objc(scrollbackText)` getter below.
+/// - `property visible text` -> `@objc(visibleText)` getter below.
 ///
 /// We keep only a weak reference to the underlying `SurfaceView` so this
 /// wrapper never extends the terminal's lifetime.
@@ -98,6 +99,14 @@ final class ScriptTerminal: NSObject {
         defer { ghostty_surface_free_text(surface, &text) }
         guard let pointer = text.text else { return "" }
         return String(bytes: UnsafeRawBufferPointer(start: pointer, count: Int(text.text_len)), encoding: .utf8) ?? ""
+    }
+
+    /// Plain text of the viewport rows on the active screen, as drawn now.
+    /// Works for terminals in unselected tabs and background windows.
+    @objc(visibleText)
+    var visibleText: String {
+        guard NSApp.isAppleScriptEnabled else { return "" }
+        return surfaceView?.cachedVisibleContents.get() ?? ""
     }
 
     /// Exposed as the AppleScript `tab color` property.
