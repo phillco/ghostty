@@ -61,14 +61,14 @@ final class VerticalTabsSettings: ObservableObject {
         width = storedWidth > 0 ? Self.clamp(CGFloat(storedWidth)) : Self.defaultWidth
         density = defaults.string(forKey: Key.density).flatMap(Density.init(rawValue:)) ?? .compact
         recentsCollapsed = defaults.bool(forKey: Key.recentsCollapsed)
-        pinsSeen = defaults.dictionary(forKey: Key.pinsSeen) as? [String: Double] ?? [:]
+        let seen = defaults.dictionary(forKey: Key.pinsSeen) as? [String: Double] ?? [:]
 
         // Drop pins whose tab has been gone for a long time (closed tabs never come back).
         let now = Date().timeIntervalSince1970
         let keys = defaults.stringArray(forKey: Key.pins) ?? []
-        let live = keys.filter { now - (pinsSeen[$0] ?? now) < Self.pinExpiry }
+        let live = keys.filter { now - (seen[$0] ?? now) < Self.pinExpiry }
         pins = .init(keys: live)
-        pinsSeen = pinsSeen.filter { live.contains($0.key) }
+        pinsSeen = seen.filter { live.contains($0.key) }
         if live != keys { defaults.set(live, forKey: Key.pins) }
     }
 
