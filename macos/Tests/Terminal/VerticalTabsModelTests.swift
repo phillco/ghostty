@@ -453,6 +453,49 @@ struct VerticalTabsModelTests {
         #expect(!VerticalTabs.hasRecentCandidates(tabs: [tab(0, selected: true)], pins: []))
     }
 
+    @Test func previousAndNextFollowSidebarOrder() {
+        // Pinned [3], Recents [1, 2], Open [0, 4]; tab 2 (a Recent) is selected.
+        let tabs = [tab(0), tab(1, left: 30), tab(2, selected: true, left: 20), tab(3), tab(4)]
+        let sections = VerticalTabs.sections(tabs: tabs, pins: ["s3"], recentsLimit: 3, keepInRecents: id(2))
+        #expect(ids(sections.visual) == [id(3), id(1), id(2), id(0), id(4)])
+        #expect(sections.tab(for: .next)?.id == id(0))
+        #expect(sections.tab(for: .previous)?.id == id(1))
+
+        func step(_ selected: Int, _ shortcut: VerticalTabs.Shortcut) -> ObjectIdentifier? {
+            var copy = sections
+            for keyPath in [\VerticalTabs.Sections.pinned, \.recents, \.open] {
+                copy[keyPath: keyPath] = copy[keyPath: keyPath].map { tab in
+                    var tab = tab
+                    tab.isSelected = tab.id == id(selected)
+                    return tab
+                }
+            }
+            return copy.tab(for: shortcut)?.id
+        }
+        // Pinned → Recents and Recents → Open, both ways, wrapping at the ends.
+        #expect(step(3, .next) == id(1))
+        #expect(step(1, .previous) == id(3))
+        #expect(step(4, .next) == id(3))
+        #expect(step(3, .previous) == id(4))
+        // Nothing selected: the first row.
+        #expect(step(11, .next) == id(3))
+        // Numbers still skip Recents.
+        #expect(sections.tab(for: .number(2))?.id == id(0))
+        #expect(sections.tab(for: .last)?.id == id(4))
+    }
+
+    @Test func previousAndNextWithRecentsCollapsedOrHidden() {
+        // Collapsed and hidden Recents both build sections with no Recents rows.
+        let tabs = [tab(0, left: 10), tab(1, selected: true, left: 20), tab(2, left: 30), tab(3)]
+        let sections = VerticalTabs.sections(tabs: tabs, pins: ["s3"], recentsLimit: 0)
+        #expect(sections.recents.isEmpty)
+        #expect(ids(sections.visual) == ids(sections.numbered))
+        #expect(ids(sections.visual) == [id(3), id(0), id(1), id(2)])
+        #expect(sections.tab(for: .next)?.id == id(2))
+        #expect(sections.tab(for: .previous)?.id == id(0))
+        #expect(VerticalTabs.Sections().tab(for: .next) == nil)
+    }
+
     @Test func selectingStaysInSection() {
         // Tab 1 was selected from Recents, tab 2 from Open (never left).
         let fromRecents = [tab(0, left: 30), tab(1, selected: true, left: 20), tab(2)]

@@ -93,6 +93,8 @@ final class VerticalTabsGroupHost {
         self.tabGroup = tabGroup
         self.manager = manager
         lastSelectedWindow = tabGroup.selectedWindow as? TerminalWindow
+        // Selected since before we tracked it: the first switch away still counts.
+        if let selected = lastSelectedWindow { manager.tracker(for: selected).lastEntered = .distantPast }
         let view = NSHostingView(rootView: VerticalTabsSidebar(
             store: store,
             settings: manager.settings

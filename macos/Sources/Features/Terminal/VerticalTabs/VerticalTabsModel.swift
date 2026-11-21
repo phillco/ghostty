@@ -156,10 +156,12 @@ enum VerticalTabs {
         var pinKey: String? { surfaceIDs.first }
     }
 
-    /// A goto_tab target: `goto_tab:N` or `last_tab`.
+    /// A goto_tab target: `goto_tab:N`, `last_tab`, `previous_tab` or `next_tab`.
     enum Shortcut: Equatable {
         case number(Int)
         case last
+        case previous
+        case next
     }
 
     struct Sections: Equatable {
@@ -169,6 +171,9 @@ enum VerticalTabs {
 
         /// The rows `Cmd+1..9` address: Pinned then Open, skipping Recents.
         var numbered: [Tab] { pinned + open }
+
+        /// Every row in sidebar order; previous/next tab step through it.
+        var visual: [Tab] { pinned + recents + open }
 
         /// The shortcut label for a tab, following Ghostty's default bindings:
         /// `Cmd+1..8` are `goto_tab:1..8` and `Cmd+9` is `last_tab`. So the first
@@ -183,16 +188,21 @@ enum VerticalTabs {
         }
 
         /// The tab a goto_tab shortcut selects. Numbers past the end pick the last
-        /// numbered tab, matching Ghostty's horizontal behavior.
+        /// numbered tab, matching Ghostty's horizontal behavior. Previous/next
+        /// wrap around the sidebar's visual order.
         func tab(for shortcut: Shortcut) -> Tab? {
-            let list = numbered
-            guard !list.isEmpty else { return nil }
             switch shortcut {
             case .last:
-                return list.last
+                return numbered.last
             case .number(let n):
-                guard n >= 1 else { return nil }
+                let list = numbered
+                guard n >= 1, !list.isEmpty else { return nil }
                 return list[min(n - 1, list.count - 1)]
+            case .previous, .next:
+                let list = visual
+                guard let index = list.firstIndex(where: \.isSelected) else { return list.first }
+                let step = shortcut == .next ? 1 : -1
+                return list[(index + step + list.count) % list.count]
             }
         }
     }

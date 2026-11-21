@@ -24,6 +24,9 @@ final class VerticalTabsManager: NSObject {
 
     var isEnabled: Bool { settings.enabled }
 
+    /// How long a tab must stay selected before leaving it puts it in Recents.
+    static let recentsDwell: TimeInterval = 1.0
+
     /// The leading inset a terminal container should use right now. Windows that
     /// can't tab (hidden titlebar) never get a sidebar, so they get no gutter.
     func leadingInset(for window: NSWindow) -> CGFloat {
@@ -159,10 +162,15 @@ final class VerticalTabsManager: NSObject {
         guard isEnabled, window.tabbingMode != .disallowed, let tabGroup = window.tabGroup else { return }
         let host = host(for: tabGroup)
         let now = Date()
-        // The tab switched away from enters Recents; the newly selected one stays put.
+        // The tab switched away from enters Recents; the newly selected one stays
+        // put. A tab passed through quickly (stepping with previous/next tab)
+        // doesn't, so Recents holds still mid-walk.
         if let previous = host.lastSelectedWindow, previous !== window, previous.tabGroup === tabGroup {
-            tracker(for: previous).lastLeft = now
+            let previousTracker = tracker(for: previous)
+            let dwelled = previousTracker.lastEntered.map { now.timeIntervalSince($0) >= Self.recentsDwell } ?? true
+            if dwelled { previousTracker.lastLeft = now }
         }
+        if host.lastSelectedWindow !== window { tracker(for: window).lastEntered = now }
         host.lastSelectedWindow = window
         let id = ObjectIdentifier(window)
         host.keptRecent = host.sections.recents.contains { $0.id == id } ? id : nil
@@ -356,6 +364,8 @@ extension VerticalTabsManager: NSMenuItemValidation {
 final class WindowTracker {
     /// When another tab in the group was selected over this one; ranks Recents.
     var lastLeft: Date?
+    /// When this tab was last selected; see `VerticalTabsManager.recentsDwell`.
+    var lastEntered: Date?
     var lastActive: Date?
     /// The pin key this tab matched on the last refresh.
     var claimedPinKey: String?

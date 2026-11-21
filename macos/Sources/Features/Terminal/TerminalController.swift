@@ -1816,10 +1816,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // This will be the index we want to actual go to
         let finalIndex: Int
 
-        // Vertical tabs number Pinned then Open rows, skipping Recents.
-        let verticalShortcut: VerticalTabs.Shortcut? = tabIndex >= 1
-            ? .number(Int(tabIndex))
-            : (tabIndex == GHOSTTY_GOTO_TAB_LAST.rawValue ? .last : nil)
+        // Vertical tabs number Pinned then Open rows, skipping Recents;
+        // previous/next step through the sidebar's visual order.
+        let verticalShortcut: VerticalTabs.Shortcut?
+        switch tabIndex {
+        case 1...: verticalShortcut = .number(Int(tabIndex))
+        case GHOSTTY_GOTO_TAB_LAST.rawValue: verticalShortcut = .last
+        case GHOSTTY_GOTO_TAB_PREVIOUS.rawValue: verticalShortcut = .previous
+        case GHOSTTY_GOTO_TAB_NEXT.rawValue: verticalShortcut = .next
+        default: verticalShortcut = nil
+        }
         if let verticalShortcut,
            let target = VerticalTabsManager.shared.window(for: verticalShortcut, in: tabGroup) {
             target.makeKeyAndOrderFront(nil)
