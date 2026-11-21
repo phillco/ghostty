@@ -82,6 +82,7 @@ final class VerticalTabsManager: NSObject {
             ageTimer = nil
             hosts.values.forEach { $0.tearDown() }
             hosts = [:]
+            trackers.values.forEach { $0.removeBackdrop() }
             trackers = [:]
         }
     }
@@ -166,7 +167,10 @@ final class VerticalTabsManager: NSObject {
     func setLiveWidth(_ width: CGFloat, in window: NSWindow?) {
         let width = VerticalTabsSettings.clamp(width)
         hosts.values.forEach { $0.setSidebarWidth(width) }
-        (window as? TerminalWindow)?.terminalViewContainerForVerticalTabs?.leadingInset = width
+        if let window = window as? TerminalWindow {
+            window.terminalViewContainerForVerticalTabs?.leadingInset = width
+            tracker(for: window).syncBackdrop(in: window, width: width, color: window.preferredBackgroundColor)
+        }
     }
 
     /// Commits a width: persists it and applies it to every terminal window.
@@ -176,6 +180,7 @@ final class VerticalTabsManager: NSObject {
         for window in terminalWindows {
             window.terminalViewContainerForVerticalTabs?.leadingInset = leadingInset
         }
+        refreshAll()
     }
 
     // MARK: Menu
@@ -269,6 +274,45 @@ final class WindowTracker {
 
     private var titleObservation: NSKeyValueObservation?
     private var bellCancellable: AnyCancellable?
+
+    /// A plain layer-backed view filling the sidebar inset. Inactive tabs show it
+    /// in place of the live sidebar, so a tab switch never flashes the window
+    /// background before the sidebar moves in.
+    private var backdrop: NSView?
+    private var backdropWidth: NSLayoutConstraint?
+
+    func syncBackdrop(in window: TerminalWindow, width: CGFloat, color: NSColor?) {
+        guard let container = window.terminalViewContainerForVerticalTabs else { return }
+        let view: NSView
+        if let backdrop, backdrop.superview === container {
+            view = backdrop
+        } else {
+            backdrop?.removeFromSuperview()
+            view = NSView()
+            view.wantsLayer = true
+            view.translatesAutoresizingMaskIntoConstraints = false
+            // Bottom-most, so neither the terminal nor the live sidebar is covered.
+            container.addSubview(view, positioned: .below, relativeTo: nil)
+            let widthConstraint = view.widthAnchor.constraint(equalToConstant: width)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                view.topAnchor.constraint(equalTo: container.topAnchor),
+                view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                widthConstraint,
+            ])
+            backdrop = view
+            backdropWidth = widthConstraint
+        }
+        if backdropWidth?.constant != width { backdropWidth?.constant = width }
+        let cgColor = (color ?? window.backgroundColor)?.cgColor
+        if view.layer?.backgroundColor != cgColor { view.layer?.backgroundColor = cgColor }
+    }
+
+    func removeBackdrop() {
+        backdrop?.removeFromSuperview()
+        backdrop = nil
+        backdropWidth = nil
+    }
 
     init(window: TerminalWindow, onChange: @escaping () -> Void) {
         titleObservation = window.observe(\.title, options: [.new]) { [weak self] _, _ in

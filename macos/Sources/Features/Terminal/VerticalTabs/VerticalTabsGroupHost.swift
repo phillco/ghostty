@@ -118,8 +118,10 @@ final class VerticalTabsGroupHost {
         }
 
         windowsByID = Dictionary(uniqueKeysWithValues: windows.map { (ObjectIdentifier($0), $0) })
+        let width = manager.settings.width
         tabs = windows.map { window in
             let tracker = manager.tracker(for: window)
+            tracker.syncBackdrop(in: window, width: width, color: window.preferredBackgroundColor)
             let controller = window.terminalController
             let parsed = VerticalTabs.parseTitle(window.title)
             let surfaces = controller.map { Array($0.surfaceTree) } ?? []

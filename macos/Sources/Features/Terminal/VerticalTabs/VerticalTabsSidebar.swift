@@ -15,7 +15,8 @@ struct VerticalTabsSidebar: View {
             list
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.primary.opacity(0.035))
+        // The terminal-colored backdrop behind this view comes from WindowTracker.
+        .background(Color.primary.opacity(0.04))
         .overlay(alignment: .trailing) { divider }
     }
 
