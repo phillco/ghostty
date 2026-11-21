@@ -87,25 +87,39 @@ struct VerticalTabsSidebar: View {
     /// A plain stack rather than `List`: `NSTableView` animates selection and
     /// redraws its highlight when the sidebar moves between tab windows.
     private var list: some View {
+        ScrollViewReader { proxy in
+            stack
+                // Keyboard and filter selection can land offscreen; follow it.
+                .onChange(of: selectedID) { id in
+                    if let id { proxy.scrollTo(id) }
+                }
+        }
+    }
+
+    private var selectedID: ObjectIdentifier? {
+        (store.pinned + store.recents + store.open).first(where: \.isSelected)?.id
+    }
+
+    private var stack: some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 0) {
                 if isFiltering {
-                    rows(store.filteredRows, move: nil)
+                    rows(store.filteredRows, section: nil, move: nil)
                 } else {
                     if !store.pinned.isEmpty {
                         sectionHeader { Text("Pinned") }
-                        rows(store.pinned) { store.host?.movePinned(fromOffsets: $0, toOffset: $1) }
+                        rows(store.pinned, section: \.pinned) { store.host?.movePinned(fromOffsets: $0, toOffset: $1) }
                     }
 
                     if store.hasRecents {
                         sectionHeader { recentsHeader }
                         if !settings.recentsCollapsed {
-                            rows(store.recents, move: nil)
+                            rows(store.recents, section: nil, move: nil)
                         }
                     }
 
                     sectionHeader { Text("Open Tabs") }
-                    rows(store.open) { store.host?.moveOpen(fromOffsets: $0, toOffset: $1) }
+                    rows(store.open, section: \.open) { store.host?.moveOpen(fromOffsets: $0, toOffset: $1) }
                 }
             }
             .padding(.horizontal, 6)
@@ -148,12 +162,18 @@ struct VerticalTabsSidebar: View {
             showIcons: settings.showIcons)
     }
 
-    /// - Parameter move: reorders this section (`onMove` offsets); nil when it can't be reordered.
+    /// - Parameters:
+    ///   - section: the store's rows for this section, read again when a drop lands.
+    ///   - move: reorders this section (`onMove` offsets); nil when it can't be reordered.
     @ViewBuilder
-    private func rows(_ rows: [VerticalTabRow], move: ((IndexSet, Int) -> Void)?) -> some View {
+    private func rows(
+        _ rows: [VerticalTabRow],
+        section: KeyPath<VerticalTabsStore, [VerticalTabRow]>?,
+        move: ((IndexSet, Int) -> Void)?
+    ) -> some View {
         ForEach(rows) { row in
-            let view = self.row(row)
-            if let move {
+            let view = self.row(row).id(row.id)
+            if let section, let move {
                 view
                     .onDrag {
                         let payload = VerticalTabsDrop.marker + UUID().uuidString
@@ -162,7 +182,7 @@ struct VerticalTabsSidebar: View {
                         return NSItemProvider(object: payload as NSString)
                     }
                     .onDrop(of: [.text], delegate: VerticalTabsDrop(
-                        target: row.id, section: rows.map(\.id), store: store, move: move))
+                        target: row.id, section: section, store: store, move: move))
             } else {
                 view
             }
@@ -476,14 +496,20 @@ private struct VerticalTabsDrop: DropDelegate {
     static let marker = "ghostty-vertical-tab:"
 
     let target: ObjectIdentifier
-    /// The section's row IDs, in order.
-    let section: [ObjectIdentifier]
+    /// The section's rows, in order, as the store has them now.
+    let section: KeyPath<VerticalTabsStore, [VerticalTabRow]>
     let store: VerticalTabsStore
     let move: (IndexSet, Int) -> Void
 
     private var offsets: (from: Int, to: Int)? {
-        guard let dragging = store.draggingID, let from = section.firstIndex(of: dragging),
-              let to = section.firstIndex(of: target) else { return nil }
+        store.draggingID.flatMap { Self.offsets(moving: $0, onto: target, in: store[keyPath: section]) }
+    }
+
+    private static func offsets(
+        moving source: ObjectIdentifier, onto target: ObjectIdentifier, in rows: [VerticalTabRow]
+    ) -> (from: Int, to: Int)? {
+        guard let from = rows.firstIndex(where: { $0.id == source }),
+              let to = rows.firstIndex(where: { $0.id == target }) else { return nil }
         return (from, to)
     }
 
@@ -504,17 +530,21 @@ private struct VerticalTabsDrop: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        let offsets = offsets
+        let source = store.draggingID
         let expected = store.dragPayload
         store.dropTarget = nil
         store.draggingID = nil
         store.dragPayload = nil
-        guard let offsets, offsets.from != offsets.to, let expected,
+        guard let source, source != target, let expected,
               let provider = info.itemProviders(for: [.text]).first else { return false }
-        let move = move
+        let (store, section, target, move) = (store, section, target, move)
         _ = provider.loadObject(ofClass: NSString.self) { object, _ in
             guard (object as? NSString) as String? == expected else { return }
             DispatchQueue.main.async {
+                // Tabs may have closed or moved while the payload loaded: use
+                // current offsets, and drop the move if either row left.
+                guard let offsets = Self.offsets(moving: source, onto: target, in: store[keyPath: section]),
+                      offsets.from != offsets.to else { return }
                 // `onMove` semantics: insert before the destination offset.
                 move(IndexSet(integer: offsets.from), offsets.from < offsets.to ? offsets.to + 1 : offsets.to)
             }
