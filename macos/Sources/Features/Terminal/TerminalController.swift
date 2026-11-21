@@ -1826,9 +1826,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         case GHOSTTY_GOTO_TAB_NEXT.rawValue: verticalShortcut = .next
         default: verticalShortcut = nil
         }
-        if let verticalShortcut,
-           let target = VerticalTabsManager.shared.window(for: verticalShortcut, in: tabGroup) {
-            target.makeKeyAndOrderFront(nil)
+        if let verticalShortcut, VerticalTabsManager.shared.select(verticalShortcut, in: tabGroup) {
             return
         }
 

@@ -5,6 +5,10 @@ import SwiftUI
 import Testing
 @testable import Ghostty
 
+// The walk fixture's native order [P1, P2, R3, O1, R1, O2, R4, R2, O3]: Pinned
+// [P1, P2], Recents [R1, R2, R3, R4] (newest first), Open [O1, O2, O3].
+private let (p1, p2, r3, o1, r1, o2, r4, r2, o3) = (0, 1, 2, 3, 4, 5, 6, 7, 8)
+
 struct VerticalTabsModelTests {
     /// Distinct objects give us stable `ObjectIdentifier`s for fake tabs.
     private final class Token {}
@@ -710,6 +714,167 @@ struct VerticalTabsModelTests {
         // Without the walk's earlier tab, it drops back to Open: the bounce this prevents.
         let single = VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: [id(5)])
         #expect(ids(single.recents) == [id(0), id(1), id(2), id(5)])
+    }
+
+    // MARK: Walking Recents
+
+    /// Mirrors `VerticalTabsManager.windowDidBecomeMain` and `settleWalk` on a
+    /// fake group, so successive switches (not one snapshot) can be checked.
+    private struct Group {
+        let ids: [ObjectIdentifier]
+        let dwell: TimeInterval = 1
+        var now = Date(timeIntervalSince1970: 1000)
+        var lastLeft: [Int: Date]
+        var lastEntered: [Int: Date] = [:]
+        var selected: Int
+        var kept: Set<ObjectIdentifier> = []
+        var settleGeneration = 0
+        var pendingSettle: (tab: Int, entered: Date, generation: Int)?
+
+        init(ids: [ObjectIdentifier], selected: Int) {
+            self.ids = ids
+            self.selected = selected
+            let at = { Date(timeIntervalSince1970: $0) }
+            lastLeft = [r1: at(400), r2: at(300), r3: at(200), r4: at(100)]
+            // No `lastEntered` for the start tab: it has dwelled.
+            if sections.recents.contains(where: { $0.id == ids[selected] }) { kept = [ids[selected]] }
+        }
+
+        var sections: VerticalTabs.Sections {
+            let tabs = ids.indices.map { index in
+                VerticalTabs.Tab(
+                    id: ids[index], surfaceIDs: ["s\(index)"], title: "\(index)",
+                    isSelected: index == selected, lastLeft: lastLeft[index])
+            }
+            return VerticalTabs.sections(tabs: tabs, pins: ["s0", "s1"], keepInRecents: kept)
+        }
+
+        mutating func wait(_ seconds: TimeInterval) {
+            now += seconds
+            guard let pending = pendingSettle, now.timeIntervalSince(pending.entered) >= dwell else { return }
+            pendingSettle = nil
+            guard pending.tab == selected, pending.generation == settleGeneration,
+                  lastEntered[selected] == pending.entered else { return }
+            kept = kept.contains(ids[selected]) ? [ids[selected]] : []
+        }
+
+        mutating func select(_ index: Int, directional: Bool) {
+            let dwelled = lastEntered[selected].map { now.timeIntervalSince($0) >= dwell } ?? true
+            let leaving: VerticalTabs.Leaving = index == selected ? .same : .tab(dwelled: dwelled)
+            let update = VerticalTabs.recentsUpdate(
+                selecting: ids[index], leaving: leaving, directional: directional,
+                sections: sections, kept: kept)
+            if update.stampLeft { lastLeft[selected] = now }
+            if leaving != .same { lastEntered[index] = now }
+            selected = index
+            kept = update.kept
+            if directional { settleGeneration += 1 }
+            if update.settle { pendingSettle = (index, now, settleGeneration) }
+        }
+
+        /// One `previous_tab`/`next_tab`; returns the tab it selected.
+        mutating func step(_ shortcut: VerticalTabs.Shortcut, directional: Bool = true) -> Int {
+            let target = ids.firstIndex(of: sections.tab(for: shortcut)!.id)!
+            select(target, directional: directional)
+            return target
+        }
+
+        /// `count` steps `pause` apart.
+        mutating func walk(_ shortcut: VerticalTabs.Shortcut, _ count: Int, pause: TimeInterval,
+                           directional: Bool = true) -> [Int] {
+            (0..<count).map { _ in
+                wait(pause)
+                return step(shortcut, directional: directional)
+            }
+        }
+    }
+
+    private func group(selected: Int) -> Group { Group(ids: (0..<9).map(id), selected: selected) }
+
+    @Test(arguments: [0.2, 1.2])
+    func previousWalkFromFirstOpenVisitsEveryRow(pause: TimeInterval) {
+        var g = group(selected: o1)
+        let before = g.sections
+        #expect(ids(before.visual) == [p1, p2, r1, r2, r3, r4, o1, o2, o3].map(id))
+        let walk = g.walk(.previous, 9, pause: pause)
+        // No skipped R3, no early return to O1; a full lap ends where it began.
+        #expect(walk == [r4, r3, r2, r1, p2, p1, o3, o2, o1])
+        g.wait(pause)
+        #expect(ids(g.sections.visual) == ids(before.visual))
+    }
+
+    @Test(arguments: [0.2, 1.2])
+    func previousWalkFromMiddleRecentLeavesRecents(pause: TimeInterval) {
+        var g = group(selected: r2)
+        let walk = g.walk(.previous, 9, pause: pause)
+        // No R1 ↔ R2 bounce.
+        #expect(walk == [r1, p2, p1, o3, o2, o1, r4, r3, r2])
+    }
+
+    @Test(arguments: [0.2, 1.2])
+    func nextWalkVisitsEveryRow(pause: TimeInterval) {
+        var g = group(selected: o1)
+        #expect(g.walk(.next, 9, pause: pause) == [o2, o3, p1, p2, r1, r2, r3, r4, o1])
+        var h = group(selected: r2)
+        #expect(h.walk(.next, 9, pause: pause) == [r3, r4, o1, o2, o3, p1, p2, r1, r2])
+    }
+
+    @Test func walkWithoutDirectionalMarkingSkipsRows() {
+        // What the walk did before it was marked directional: O1 promotes and R3 drops out.
+        var g = group(selected: o1)
+        #expect(g.walk(.previous, 3, pause: 1.2, directional: false) == [r4, r2, r1])
+    }
+
+    @Test func slowWalkAfterQuickClicksHoldsRows() {
+        // Quick clicks O1 → R4 → R3 keep both and leave a settle pending.
+        var g = group(selected: o1)
+        g.lastEntered[o1] = g.now
+        g.select(r4, directional: false)
+        g.wait(0.2)
+        g.select(r3, directional: false)
+        #expect(g.pendingSettle != nil)
+        #expect(g.kept == [id(r4), id(r3)])
+        let rows = ids(g.sections.visual)
+        // Walking on within the dwell, then slowly: nothing settles or reorders.
+        g.wait(0.2)
+        #expect(g.step(.previous) == r2)
+        #expect(g.walk(.previous, 8, pause: 1.5) == [r1, p2, p1, o3, o2, o1, r4, r3])
+        g.wait(2)
+        #expect(g.kept == [id(r4), id(r3)])
+        #expect(ids(g.sections.visual) == rows)
+    }
+
+    @Test func sameWindowBecomingMainKeepsKeptRecents() {
+        var g = group(selected: o1)
+        g.kept = [id(r3), id(r4)]
+        let entered = g.lastEntered[o1]
+        g.select(o1, directional: false)
+        #expect(g.kept == [id(r3), id(r4)])
+        #expect(g.lastEntered[o1] == entered)
+        #expect(g.lastLeft[o1] == nil)
+    }
+
+    @Test func clickAfterDwellStillPromotes() {
+        var g = group(selected: o1)
+        g.wait(1.2)
+        g.select(o2, directional: false)
+        // O1 becomes the newest Recent; the oldest, R4, returns to Open.
+        #expect(ids(g.sections.recents) == [o1, r1, r2, r3].map(id))
+        #expect(ids(g.sections.open) == [o2, r4, o3].map(id))
+
+        // A tab reached by a walk and used, then left by a click, is promoted too.
+        var h = group(selected: o1)
+        _ = h.walk(.previous, 2, pause: 0.2)
+        #expect(h.selected == r3)
+        h.wait(1.2)
+        h.select(o2, directional: false)
+        #expect(ids(h.sections.recents).first == id(r3))
+        // A quick click promotes nothing.
+        var q = group(selected: o1)
+        _ = q.step(.previous)
+        q.wait(0.2)
+        q.select(o3, directional: false)
+        #expect(ids(q.sections.recents) == [r1, r2, r3, r4].map(id))
     }
 
     @Test func pinnedFollowPinOrderNotTabOrder() {

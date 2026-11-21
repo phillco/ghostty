@@ -174,12 +174,26 @@ final class VerticalTabsManager: NSObject {
         }
     }
 
-    /// `goto_tab:N` / `last_tab` in vertical mode: Pinned then Open, skipping Recents.
-    func window(for shortcut: VerticalTabs.Shortcut, in tabGroup: NSWindowTabGroup) -> NSWindow? {
-        guard isEnabled else { return nil }
+    /// Selects a goto_tab target in vertical mode: numbers address Pinned then
+    /// Open, skipping Recents; previous/next step through the sidebar's rows.
+    /// Returns false when vertical tabs don't handle it (native order applies).
+    func select(_ shortcut: VerticalTabs.Shortcut, in tabGroup: NSWindowTabGroup) -> Bool {
+        guard isEnabled else { return false }
         let host = host(for: tabGroup)
         host.refresh()
-        return host.window(for: shortcut)
+        guard let target = host.window(for: shortcut) else { return false }
+        let directional = shortcut == .previous || shortcut == .next
+        let id = ObjectIdentifier(target)
+        // Marked before the switch: `windowDidBecomeMain` may run inside it.
+        if directional { host.directionalTarget = id }
+        target.makeKeyAndOrderFront(nil)
+        // A refused switch (or one notifying later) must not mark a later one.
+        if directional {
+            DispatchQueue.main.async { [weak host] in
+                if host?.directionalTarget == id { host?.directionalTarget = nil }
+            }
+        }
+        return true
     }
 
     // MARK: Windows
@@ -192,21 +206,28 @@ final class VerticalTabsManager: NSObject {
         guard isEnabled, window.tabbingMode != .disallowed, let tabGroup = window.tabGroup else { return }
         let host = host(for: tabGroup)
         let now = Date()
-        // The tab switched away from enters Recents; the newly selected one stays
-        // put. A tab passed through quickly (stepping with previous/next tab)
-        // doesn't, so Recents holds still mid-walk.
-        var dwelled = true
-        if let previous = host.lastSelectedWindow, previous !== window, previous.tabGroup === tabGroup {
-            let previousTracker = tracker(for: previous)
-            dwelled = previousTracker.lastEntered.map { now.timeIntervalSince($0) >= recentsDwell } ?? true
-            if dwelled { previousTracker.lastLeft = now }
-        }
-        if host.lastSelectedWindow !== window { tracker(for: window).lastEntered = now }
-        host.lastSelectedWindow = window
         let id = ObjectIdentifier(window)
-        let kept: Set<ObjectIdentifier> = host.sections.recents.contains { $0.id == id } ? [id] : []
-        host.keptRecents = dwelled ? kept : host.keptRecents.union(kept)
-        if !dwelled { settleWalk(in: host, on: window, enteredAt: now) }
+        let directional = host.directionalTarget == id
+        host.directionalTarget = nil
+
+        let leaving: VerticalTabs.Leaving
+        if let previous = host.lastSelectedWindow, previous.tabGroup === tabGroup {
+            let entered = tracker(for: previous).lastEntered
+            leaving = previous === window
+                ? .same : .tab(dwelled: entered.map { now.timeIntervalSince($0) >= recentsDwell } ?? true)
+        } else {
+            leaving = .nothing
+        }
+        let update = VerticalTabs.recentsUpdate(
+            selecting: id, leaving: leaving, directional: directional,
+            sections: host.sections, kept: host.keptRecents)
+        if update.stampLeft, let previous = host.lastSelectedWindow { tracker(for: previous).lastLeft = now }
+        if leaving != .same { tracker(for: window).lastEntered = now }
+        host.lastSelectedWindow = window
+        host.keptRecents = update.kept
+        // A walk's rows hold still: no earlier settle may reshuffle them mid-walk.
+        if directional { host.settleGeneration += 1 }
+        if update.settle { settleWalk(in: host, on: window, enteredAt: now) }
         tracker(for: window).lastActive = now
         syncTabBar(of: window)
         let inset = leadingInset(for: window)
@@ -223,12 +244,15 @@ final class VerticalTabsManager: NSObject {
     /// `entered` ties the check to this visit: an A→B→A walk's first timer
     /// must not settle the second, shorter visit to A. The deadline counts from
     /// `entered`, so rescheduling after a dwell change keeps the visit's start,
-    /// and a callback fires only once the current dwell has passed.
+    /// and a callback fires only once the current dwell has passed. A
+    /// directional step bumps `settleGeneration`, cancelling pending callbacks.
     private func settleWalk(in host: VerticalTabsGroupHost, on window: TerminalWindow, enteredAt entered: Date) {
         let delay = max(0, recentsDwell - Date().timeIntervalSince(entered))
+        let generation = host.settleGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak host, weak window] in
             // A callback from before a dwell increase is early; the rescheduled one settles.
             guard let self, let host, let window, host.lastSelectedWindow === window,
+                  host.settleGeneration == generation,
                   self.trackers[ObjectIdentifier(window)]?.lastEntered == entered,
                   Date().timeIntervalSince(entered) >= self.recentsDwell - 0.01 else { return }
             let id = ObjectIdentifier(window)

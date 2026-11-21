@@ -216,8 +216,8 @@ enum VerticalTabs {
     ///   by when a tab was left, not focused, keeps a tab selected from Recents
     ///   in Recents and one selected from Open in Open.
     /// - Open keeps tab group order for everything else.
-    /// - `keepInRecents`: tabs selected from Recents (during one previous/next
-    ///   walk, several) stay there even when tabs just left push them past
+    /// - `keepInRecents`: tabs selected from Recents (after quick clicks,
+    ///   several) stay there even when tabs just left push them past
     ///   `recentsLimit`; the oldest other Recents yield.
     static func sections(
         tabs: [Tab], pins: [String], recentsLimit: Int = recentsLimit, keepInRecents: Set<ObjectIdentifier> = []
@@ -247,6 +247,46 @@ enum VerticalTabs {
 
         result.open = tabs.filter { !used.contains($0.id) }
         return result
+    }
+
+    /// What was selected in a group before a tab became main.
+    enum Leaving: Equatable {
+        /// Nothing tracked yet (new group, or the last tab moved to another group).
+        case nothing
+        /// The same tab again, e.g. returning to this group from another window.
+        case same
+        /// Another tab; `dwelled`: selected for at least the Recents dwell time
+        /// (or since before we tracked it).
+        case tab(dwelled: Bool)
+    }
+
+    /// How selecting a tab changes Recents.
+    struct RecentsUpdate: Equatable {
+        /// The tab left becomes the newest Recent.
+        var stampLeft = false
+        var kept: Set<ObjectIdentifier>
+        /// Settle `kept` once the new tab has been selected for the dwell time.
+        var settle = false
+    }
+
+    /// The Recents bookkeeping for selecting `id`, given `sections` before the switch.
+    ///
+    /// - Directional (`previous_tab`/`next_tab`) steps change nothing, so the rows
+    ///   being walked hold still however fast or slow the walk; a tab left this way
+    ///   isn't promoted.
+    /// - Leaving a tab that dwelled promotes it; the selection stays kept in
+    ///   Recents if it was picked from there.
+    /// - Leaving one sooner (a quick pass-through) promotes nothing and adds the
+    ///   selection to `kept` until it settles.
+    static func recentsUpdate(
+        selecting id: ObjectIdentifier, leaving: Leaving, directional: Bool,
+        sections: Sections, kept: Set<ObjectIdentifier>
+    ) -> RecentsUpdate {
+        if directional || leaving == .same { return .init(kept: kept) }
+        let selected: Set<ObjectIdentifier> = sections.recents.contains { $0.id == id } ? [id] : []
+        guard case .tab(let dwelled) = leaving else { return .init(kept: selected) }
+        if !dwelled { return .init(kept: kept.union(selected), settle: true) }
+        return .init(stampLeft: true, kept: selected)
     }
 
     /// Matches pin keys to tabs, in pin order. A tab that claimed a key wins over

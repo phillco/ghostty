@@ -84,9 +84,14 @@ final class VerticalTabsGroupHost {
     /// The tab selected last, so the next selection can stamp when it was left.
     weak var lastSelectedWindow: TerminalWindow?
     /// The selected tab, when it was selected from Recents: it stays in Recents.
-    /// During a quick previous/next walk, every tab passed through from Recents,
-    /// so Recents holds still until the walk settles.
+    /// After quick clicks, every tab passed through from Recents, so Recents
+    /// holds still until the selection settles. Previous/next leave it alone.
     var keptRecents: Set<ObjectIdentifier> = []
+    /// The tab a previous/next step is switching to; its selection leaves
+    /// Recents untouched. Cleared once any tab becomes main.
+    var directionalTarget: ObjectIdentifier?
+    /// Bumped by directional steps so pending walk-settle callbacks no-op.
+    var settleGeneration = 0
     /// A tab clicked in the sidebar that AppKit hasn't selected yet. Refreshes
     /// in between keep showing it selected, so the highlight never bounces back.
     private var pendingSelection: ObjectIdentifier?
