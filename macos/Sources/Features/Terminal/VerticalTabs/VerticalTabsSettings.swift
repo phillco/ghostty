@@ -48,6 +48,8 @@ final class VerticalTabsSettings: ObservableObject {
         static let width = "VerticalTabsWidth"
         static let density = "VerticalTabsDensity"
         static let textSize = "VerticalTabsTextSize"
+        /// The configured font size a menu preset overrides, so it survives restarts.
+        static let textSizeOverrides = "VerticalTabsTextSizeOverridesConfig"
         static let showFolders = "VerticalTabsShowFolders"
         static let showIdleTime = "VerticalTabsShowIdleTime"
         static let showShortcuts = "VerticalTabsShowShortcuts"
@@ -90,12 +92,16 @@ final class VerticalTabsSettings: ObservableObject {
     @Published private(set) var useConfigFontSize = false
 
     /// Takes new config values. A changed `vertical-tabs-font-size` takes over
-    /// from the menu's size; removing it falls back to the menu's size.
+    /// from the menu's size, unless a preset was picked over that same size;
+    /// removing it falls back to the menu's size.
     func applyConfig(_ values: ConfigValues) {
         guard values != config else { return }
         let fontChanged = values.fontSize != config.fontSize
         config = values
-        if fontChanged { useConfigFontSize = values.fontSize != nil }
+        guard fontChanged else { return }
+        let overridden = defaults.object(forKey: Key.textSizeOverrides) as? Double
+        useConfigFontSize = values.fontSize.map { Double($0) != overridden } ?? false
+        if useConfigFontSize || values.fontSize == nil { defaults.removeObject(forKey: Key.textSizeOverrides) }
     }
 
     /// The Text Size menu's choice: nil is the configured size.
@@ -104,6 +110,11 @@ final class VerticalTabsSettings: ObservableObject {
         set {
             if let newValue { textSize = newValue }
             useConfigFontSize = newValue == nil && config.fontSize != nil
+            if let size = config.fontSize, !useConfigFontSize {
+                defaults.set(Double(size), forKey: Key.textSizeOverrides)
+            } else {
+                defaults.removeObject(forKey: Key.textSizeOverrides)
+            }
         }
     }
 

@@ -340,6 +340,21 @@ struct VerticalTabsModelTests {
             #expect(settings.fontSize == 13)
             #expect(VerticalTabsSettings(defaults: defaults).textSize == .medium)
 
+            // A preset picked over a configured size survives a restart at that size,
+            // but a different configured size takes over again.
+            settings.applyConfig(.init(fontSize: 14))
+            settings.textSizeChoice = .large
+            let restarted = VerticalTabsSettings(defaults: defaults)
+            restarted.applyConfig(.init(fontSize: 14))
+            #expect(restarted.textSizeChoice == .large)
+            #expect(restarted.fontSize == 15)
+            let changed = VerticalTabsSettings(defaults: defaults)
+            changed.applyConfig(.init(fontSize: 18))
+            #expect(changed.textSizeChoice == nil)
+            #expect(changed.fontSize == 18)
+            settings.applyConfig(.init())
+            settings.textSizeChoice = .medium
+
             // Config can't be chosen without a configured size.
             settings.textSizeChoice = nil
             #expect(settings.fontSize == 13)
