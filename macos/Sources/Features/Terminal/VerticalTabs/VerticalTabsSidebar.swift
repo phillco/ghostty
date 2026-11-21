@@ -55,10 +55,14 @@ struct VerticalTabsSidebar: View {
             }
             .pickerStyle(.inline)
 
-            Picker("Text Size", selection: $settings.textSize) {
-                Text("Small").tag(VerticalTabsSettings.TextSize.small)
-                Text("Medium").tag(VerticalTabsSettings.TextSize.medium)
-                Text("Large").tag(VerticalTabsSettings.TextSize.large)
+            Picker("Text Size", selection: $settings.textSizeChoice) {
+                if let size = settings.config.fontSize {
+                    Text("Config (\(VerticalTabsSettings.pointLabel(size)))")
+                        .tag(VerticalTabsSettings.TextSize?.none)
+                }
+                Text("Small").tag(VerticalTabsSettings.TextSize?.some(.small))
+                Text("Medium").tag(VerticalTabsSettings.TextSize?.some(.medium))
+                Text("Large").tag(VerticalTabsSettings.TextSize?.some(.large))
             }
             .pickerStyle(.inline)
 
@@ -131,7 +135,7 @@ struct VerticalTabsSidebar: View {
 
     private func sectionHeader<Label: View>(@ViewBuilder _ label: () -> Label) -> some View {
         label()
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: max(10, settings.secondaryFontSize), weight: .semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6)
             .padding(.top, 8)
@@ -144,7 +148,7 @@ struct VerticalTabsSidebar: View {
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: settings.recentsCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: max(8, settings.secondaryFontSize - 3), weight: .bold))
                 Text("Recents")
             }
             .contentShape(Rectangle())
@@ -155,7 +159,9 @@ struct VerticalTabsSidebar: View {
     private var rowStyle: VerticalTabRowStyle {
         VerticalTabRowStyle(
             density: settings.density,
-            fontSize: settings.textSize.pointSize,
+            fontSize: settings.fontSize,
+            secondarySize: settings.secondaryFontSize,
+            pillMaxChars: settings.config.pillMaxChars,
             showFolders: settings.showFolders,
             showIdleTime: settings.showIdleTime,
             showShortcuts: settings.showShortcuts,
@@ -250,12 +256,13 @@ struct VerticalTabsSidebar: View {
 private struct VerticalTabRowStyle: Equatable {
     let density: VerticalTabsSettings.Density
     let fontSize: CGFloat
+    let secondarySize: CGFloat
+    let pillMaxChars: Int
     let showFolders: Bool
     let showIdleTime: Bool
     let showShortcuts: Bool
     let showIcons: Bool
 
-    var secondarySize: CGFloat { fontSize - 2 }
     var minRowHeight: CGFloat { fontSize + 9 }
 }
 
@@ -320,7 +327,7 @@ private struct VerticalTabRowView: View {
             title
             Spacer(minLength: 2)
             if row.bell { bell }
-            if let folder { FolderPill(folder: folder, fontSize: style.secondarySize) }
+            if let folder { FolderPill(folder: folder, style: style) }
             trailing
         }
     }
@@ -332,7 +339,7 @@ private struct VerticalTabRowView: View {
                 title
                 if folder != nil || row.bell || age != nil {
                     HStack(spacing: 4) {
-                        if let folder { FolderPill(folder: folder, fontSize: style.secondarySize) }
+                        if let folder { FolderPill(folder: folder, style: style) }
                         if row.bell { bell }
                         if let age { ageText(age) }
                     }
@@ -430,7 +437,7 @@ private struct VerticalTabRowView: View {
         Button { store.host?.close(row.id) } label: {
             Image(systemName: "xmark")
                 .font(.system(size: style.secondarySize - 1, weight: .semibold))
-                .frame(width: 16, height: 14)
+                .frame(width: max(16, style.secondarySize + 5), height: max(14, style.secondarySize + 3))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
@@ -441,12 +448,12 @@ private struct VerticalTabRowView: View {
 /// A short folder name on a subtle, deterministic tint.
 private struct FolderPill: View {
     let folder: String
-    let fontSize: CGFloat
+    let style: VerticalTabRowStyle
 
     var body: some View {
         let hue = VerticalTabs.hue(for: folder)
-        Text(VerticalTabs.pillText(folder))
-            .font(.system(size: fontSize, weight: .medium))
+        Text(VerticalTabs.pillText(folder, maxChars: style.pillMaxChars))
+            .font(.system(size: style.secondarySize, weight: .medium))
             .lineLimit(1)
             .padding(.horizontal, 4)
             .padding(.vertical, 0.5)

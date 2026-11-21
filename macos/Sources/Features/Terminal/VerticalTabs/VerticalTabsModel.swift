@@ -3,7 +3,7 @@ import Foundation
 /// Pure, AppKit-free logic behind the vertical tab sidebar. Everything here is
 /// unit tested; the AppKit glue lives in `VerticalTabsManager`.
 enum VerticalTabs {
-    /// The number of rows shown in the Recents section.
+    /// The default number of rows in Recents (`vertical-tabs-recents-limit`).
     static let recentsLimit = 4
 
     /// Which agent produced a title, detected from its leading glyph.
@@ -92,8 +92,10 @@ enum VerticalTabs {
     }
 
     /// A folder name shortened for its pill, so long repo names don't starve the title.
-    static func pillText(_ folder: String, maxLength: Int = 12) -> String {
-        folder.count <= maxLength ? folder : String(folder.prefix(maxLength - 1)) + "…"
+    /// `maxChars` 0 never truncates.
+    static func pillText(_ folder: String, maxChars: Int = 12) -> String {
+        guard maxChars > 0, folder.count > maxChars else { return folder }
+        return String(folder.prefix(maxChars - 1)) + "…"
     }
 
     /// The short folder name shown in a row's pill: the last path component,

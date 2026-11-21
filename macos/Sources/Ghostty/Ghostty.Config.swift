@@ -152,6 +152,51 @@ extension Ghostty {
             return Float(v)
         }
 
+        var verticalTabsFontSize: CGFloat? {
+            Self.pointSize(double("vertical-tabs-font-size"), in: 8...32)
+        }
+
+        var verticalTabsSecondaryFontSize: CGFloat? {
+            Self.pointSize(double("vertical-tabs-secondary-font-size"), in: 7...28)
+        }
+
+        var verticalTabsRecentsLimit: Int {
+            min(Int(uint("vertical-tabs-recents-limit") ?? 4), 20)
+        }
+
+        var verticalTabsRecentsDwell: TimeInterval {
+            Self.recentsDwell(double("vertical-tabs-recents-dwell") ?? 1)
+        }
+
+        var verticalTabsPillMaxChars: Int {
+            Int(uint("vertical-tabs-pill-max-chars") ?? 12)
+        }
+
+        /// A configured point size, or nil when unset (`<= 0`) or not finite.
+        static func pointSize(_ value: Double?, in range: ClosedRange<CGFloat>) -> CGFloat? {
+            guard let value, value.isFinite, value > 0 else { return nil }
+            return min(max(CGFloat(value), range.lowerBound), range.upperBound)
+        }
+
+        /// A configured dwell capped at 30s; the 1s default when negative or not finite.
+        static func recentsDwell(_ value: Double) -> TimeInterval {
+            value.isFinite && value >= 0 ? min(value, 30) : 1
+        }
+
+        private func double(_ key: String) -> Double? {
+            guard let config = self.config else { return nil }
+            var v: Double = 0
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return nil }
+            return v
+        }
+
+        private func uint(_ key: String) -> CUnsignedInt? {
+            guard let config = self.config else { return nil }
+            var v: CUnsignedInt = 0
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return nil }
+            return v
+        }
+
         var notifyOnCommandFinish: NotifyOnCommandFinish {
             guard let config = self.config else { return .never }
             var v: UnsafePointer<Int8>?

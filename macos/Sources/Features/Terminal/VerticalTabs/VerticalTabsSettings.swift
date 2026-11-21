@@ -19,10 +19,22 @@ final class VerticalTabsSettings: ObservableObject {
         var pointSize: CGFloat {
             switch self {
             case .small: return 11
-            case .medium: return 12
-            case .large: return 13
+            case .medium: return 13
+            case .large: return 15
             }
         }
+    }
+
+    /// The `vertical-tabs-*` keys from the Ghostty config, already validated.
+    struct ConfigValues: Equatable {
+        /// nil: use the View Options menu's `textSize`.
+        var fontSize: CGFloat?
+        /// nil: derived from the title size.
+        var secondaryFontSize: CGFloat?
+        var recentsLimit = VerticalTabs.recentsLimit
+        var recentsDwell: TimeInterval = 1
+        /// 0: folder pills never truncate.
+        var pillMaxChars = 12
     }
 
     static let defaultWidth: CGFloat = 240
@@ -68,6 +80,44 @@ final class VerticalTabsSettings: ObservableObject {
 
     @Published var textSize: TextSize {
         didSet { save(textSize.rawValue, Key.textSize) }
+    }
+
+    /// Live `vertical-tabs-*` config values; see `applyConfig`.
+    @Published private(set) var config = ConfigValues()
+
+    /// Whether the title size comes from `config.fontSize` rather than `textSize`.
+    /// Picking a menu size turns it off until the configured size changes.
+    @Published private(set) var useConfigFontSize = false
+
+    /// Takes new config values. A changed `vertical-tabs-font-size` takes over
+    /// from the menu's size; removing it falls back to the menu's size.
+    func applyConfig(_ values: ConfigValues) {
+        guard values != config else { return }
+        let fontChanged = values.fontSize != config.fontSize
+        config = values
+        if fontChanged { useConfigFontSize = values.fontSize != nil }
+    }
+
+    /// The Text Size menu's choice: nil is the configured size.
+    var textSizeChoice: TextSize? {
+        get { useConfigFontSize ? nil : textSize }
+        set {
+            if let newValue { textSize = newValue }
+            useConfigFontSize = newValue == nil && config.fontSize != nil
+        }
+    }
+
+    var fontSize: CGFloat {
+        useConfigFontSize ? config.fontSize ?? textSize.pointSize : textSize.pointSize
+    }
+
+    var secondaryFontSize: CGFloat {
+        config.secondaryFontSize ?? max(9, fontSize - 2)
+    }
+
+    /// `14pt`, `14.5pt`.
+    static func pointLabel(_ size: CGFloat) -> String {
+        String(format: "%gpt", Double(size))
     }
 
     /// Project (folder) labels on each row.
@@ -169,7 +219,7 @@ final class VerticalTabsSettings: ObservableObject {
             let storedWidth = defaults.double(forKey: Key.width)
             width = storedWidth > 0 ? VerticalTabsSettings.clamp(CGFloat(storedWidth)) : VerticalTabsSettings.defaultWidth
             density = defaults.string(forKey: Key.density).flatMap(Density.init(rawValue:)) ?? .compact
-            textSize = defaults.string(forKey: Key.textSize).flatMap(TextSize.init(rawValue:)) ?? .small
+            textSize = defaults.string(forKey: Key.textSize).flatMap(TextSize.init(rawValue:)) ?? .medium
             showFolders = defaults.object(forKey: Key.showFolders) as? Bool ?? true
             showIdleTime = defaults.object(forKey: Key.showIdleTime) as? Bool ?? true
             showShortcuts = defaults.object(forKey: Key.showShortcuts) as? Bool ?? true
@@ -204,5 +254,16 @@ final class VerticalTabsSettings: ObservableObject {
             changed = true
         }
         if changed { defaults.set(pinsSeen, forKey: Key.pinsSeen) }
+    }
+}
+
+extension VerticalTabsSettings.ConfigValues {
+    init(_ config: Ghostty.Config) {
+        self.init(
+            fontSize: config.verticalTabsFontSize,
+            secondaryFontSize: config.verticalTabsSecondaryFontSize,
+            recentsLimit: config.verticalTabsRecentsLimit,
+            recentsDwell: config.verticalTabsRecentsDwell,
+            pillMaxChars: config.verticalTabsPillMaxChars)
     }
 }

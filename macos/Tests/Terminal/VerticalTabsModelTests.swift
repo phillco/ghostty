@@ -89,6 +89,9 @@ struct VerticalTabsModelTests {
         #expect(VerticalTabs.pillText("ghostty") == "ghostty")
         #expect(VerticalTabs.pillText("Clarc-observer") == "Clarc-obser…")
         #expect(VerticalTabs.pillText("Clarc-observer").count == 12)
+        #expect(VerticalTabs.pillText("Clarc-observer", maxChars: 0) == "Clarc-observer")
+        #expect(VerticalTabs.pillText("Clarc-observer", maxChars: 6) == "Clarc…")
+        #expect(VerticalTabs.pillText("Clarc", maxChars: 6) == "Clarc")
     }
 
     // MARK: Copy ID
@@ -269,13 +272,91 @@ struct VerticalTabsModelTests {
         withFreshDefaults { defaults in
             let settings = VerticalTabsSettings(defaults: defaults)
             #expect(settings.density == .compact)
-            #expect(settings.textSize == .small)
-            #expect(settings.textSize.pointSize == 11)
+            #expect(settings.textSize == .medium)
+            #expect(settings.fontSize == 13)
+            #expect(settings.secondaryFontSize == 11)
+            #expect(settings.config == .init())
             #expect(settings.showFolders)
             #expect(settings.showIdleTime)
             #expect(settings.showShortcuts)
             #expect(settings.showIcons)
             #expect(settings.showRecents)
+        }
+    }
+
+    @Test func textSizePoints() {
+        #expect(VerticalTabsSettings.TextSize.allCases.map(\.pointSize) == [11, 13, 15])
+    }
+
+    @Test func configPointSizes() {
+        #expect(Ghostty.Config.pointSize(0, in: 8...32) == nil)
+        #expect(Ghostty.Config.pointSize(-3, in: 8...32) == nil)
+        #expect(Ghostty.Config.pointSize(.nan, in: 8...32) == nil)
+        #expect(Ghostty.Config.pointSize(.infinity, in: 8...32) == nil)
+        #expect(Ghostty.Config.pointSize(nil, in: 8...32) == nil)
+        #expect(Ghostty.Config.pointSize(4, in: 8...32) == 8)
+        #expect(Ghostty.Config.pointSize(14.5, in: 8...32) == 14.5)
+        #expect(Ghostty.Config.pointSize(99, in: 8...32) == 32)
+        #expect(Ghostty.Config.recentsDwell(.nan) == 1)
+        #expect(Ghostty.Config.recentsDwell(-1) == 1)
+        #expect(Ghostty.Config.recentsDwell(0) == 0)
+        #expect(Ghostty.Config.recentsDwell(2.5) == 2.5)
+        #expect(Ghostty.Config.recentsDwell(100) == 30)
+        #expect(VerticalTabsSettings.ConfigValues() == .init(
+            fontSize: nil, secondaryFontSize: nil, recentsLimit: 4, recentsDwell: 1, pillMaxChars: 12))
+        #expect(VerticalTabsSettings.pointLabel(14) == "14pt")
+        #expect(VerticalTabsSettings.pointLabel(14.5) == "14.5pt")
+    }
+
+    @Test func configFontSizePrecedence() {
+        withFreshDefaults { defaults in
+            let settings = VerticalTabsSettings(defaults: defaults)
+            settings.textSize = .large
+
+            // Setting the key takes over from the menu.
+            settings.applyConfig(.init(fontSize: 14))
+            #expect(settings.textSizeChoice == nil)
+            #expect(settings.fontSize == 14)
+            #expect(settings.secondaryFontSize == 12)
+
+            // The menu overrides it, and an unrelated reload keeps that choice.
+            settings.textSizeChoice = .small
+            #expect(settings.fontSize == 11)
+            #expect(settings.textSize == .small)
+            settings.applyConfig(.init(fontSize: 14, recentsLimit: 2))
+            #expect(settings.fontSize == 11)
+
+            // Choosing Config again, or changing the key, re-selects it.
+            settings.textSizeChoice = nil
+            #expect(settings.fontSize == 14)
+            settings.textSizeChoice = .medium
+            settings.applyConfig(.init(fontSize: 16, recentsLimit: 2))
+            #expect(settings.textSizeChoice == nil)
+            #expect(settings.fontSize == 16)
+
+            // Removing the key falls back to the persisted menu size.
+            settings.applyConfig(.init())
+            #expect(settings.textSizeChoice == .medium)
+            #expect(settings.fontSize == 13)
+            #expect(VerticalTabsSettings(defaults: defaults).textSize == .medium)
+
+            // Config can't be chosen without a configured size.
+            settings.textSizeChoice = nil
+            #expect(settings.fontSize == 13)
+        }
+    }
+
+    @Test func configSecondaryFontSize() {
+        withFreshDefaults { defaults in
+            let settings = VerticalTabsSettings(defaults: defaults)
+            settings.textSize = .small
+            #expect(settings.secondaryFontSize == 9)
+            settings.applyConfig(.init(fontSize: 20, secondaryFontSize: 10))
+            #expect(settings.fontSize == 20)
+            #expect(settings.secondaryFontSize == 10)
+            settings.applyConfig(.init(secondaryFontSize: 12))
+            #expect(settings.fontSize == 11)
+            #expect(settings.secondaryFontSize == 12)
         }
     }
 

@@ -25,7 +25,7 @@ final class VerticalTabsManager: NSObject {
     var isEnabled: Bool { settings.enabled }
 
     /// How long a tab must stay selected before leaving it puts it in Recents.
-    static let recentsDwell: TimeInterval = 1.0
+    private var recentsDwell: TimeInterval { settings.config.recentsDwell }
 
     /// The leading inset a terminal container should use right now. Windows that
     /// can't tab (hidden titlebar) never get a sidebar, so they get no gutter.
@@ -73,6 +73,18 @@ final class VerticalTabsManager: NSObject {
             self?.syncSiblingFrames(of: window)
         })
 
+        // `vertical-tabs-*` keys live-reload with the rest of the config.
+        observers.append(center.addObserver(
+            forName: .ghosttyConfigDidChange, object: nil, queue: .main
+        ) { [weak self] n in
+            // Surface-scoped changes carry an object; only the app config counts.
+            guard n.object == nil,
+                  let config = n.userInfo?[Notification.Name.GhosttyConfigChangeKey] as? Ghostty.Config
+            else { return }
+            self?.applyConfig(config)
+        })
+        if let config = (NSApp.delegate as? AppDelegate)?.ghostty.config { applyConfig(config) }
+
         // `ghostty-test-mirror` rewrites our prefs while we run, then posts this.
         distributedObservers.append(DistributedNotificationCenter.default().addObserver(
             forName: Self.reloadPrefsNotification, object: nil, queue: .main
@@ -87,6 +99,13 @@ final class VerticalTabsManager: NSObject {
             .sink { [weak self] _ in DispatchQueue.main.async { self?.refreshAll() } }
 
         if isEnabled { applyEnabled() }
+    }
+
+    private func applyConfig(_ config: Ghostty.Config) {
+        let old = settings.config
+        settings.applyConfig(.init(config))
+        // Fonts redraw through `settings`; Recents' size changes the sections.
+        if settings.config.recentsLimit != old.recentsLimit { refreshAll() }
     }
 
     /// Posted (distributed) by tools that write our `VerticalTabs*` defaults.
@@ -171,7 +190,7 @@ final class VerticalTabsManager: NSObject {
         var dwelled = true
         if let previous = host.lastSelectedWindow, previous !== window, previous.tabGroup === tabGroup {
             let previousTracker = tracker(for: previous)
-            dwelled = previousTracker.lastEntered.map { now.timeIntervalSince($0) >= Self.recentsDwell } ?? true
+            dwelled = previousTracker.lastEntered.map { now.timeIntervalSince($0) >= recentsDwell } ?? true
             if dwelled { previousTracker.lastLeft = now }
         }
         if host.lastSelectedWindow !== window { tracker(for: window).lastEntered = now }
@@ -196,7 +215,7 @@ final class VerticalTabsManager: NSObject {
     /// `entered` ties the check to this visit: an A→B→A walk's first timer
     /// must not settle the second, shorter visit to A.
     private func settleWalk(in host: VerticalTabsGroupHost, on window: TerminalWindow, enteredAt entered: Date) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.recentsDwell) { [weak self, weak host, weak window] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + recentsDwell) { [weak self, weak host, weak window] in
             guard let self, let host, let window, host.lastSelectedWindow === window,
                   self.tracker(for: window).lastEntered == entered else { return }
             let id = ObjectIdentifier(window)

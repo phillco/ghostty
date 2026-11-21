@@ -208,11 +208,13 @@ final class VerticalTabsGroupHost {
         }
         // Collapsed or hidden Recents must not hide tabs: they stay in Open instead.
         let settings = manager.settings
+        let limit = settings.config.recentsLimit
         let recentsOff = settings.recentsCollapsed || !settings.showRecents
         sections = VerticalTabs.sections(
-            tabs: tabs, pins: pins, recentsLimit: recentsOff ? 0 : VerticalTabs.recentsLimit,
+            tabs: tabs, pins: pins, recentsLimit: recentsOff ? 0 : limit,
             keepInRecents: keptRecents)
-        let hasRecents = settings.showRecents && VerticalTabs.hasRecentCandidates(tabs: tabs, pins: pins)
+        let hasRecents = settings.showRecents && limit > 0
+            && VerticalTabs.hasRecentCandidates(tabs: tabs, pins: pins)
         if store.hasRecents != hasRecents { store.hasRecents = hasRecents }
         let now = Date()
         func rows(_ list: [VerticalTabs.Tab], pinned: Bool) -> [VerticalTabRow] {
