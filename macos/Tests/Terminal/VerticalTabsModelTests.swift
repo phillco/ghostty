@@ -361,6 +361,21 @@ struct VerticalTabsModelTests {
         }
     }
 
+    @Test func overrideClearedAtLaunchWithoutConfiguredSize() {
+        withFreshDefaults { defaults in
+            let first = VerticalTabsSettings(defaults: defaults)
+            first.applyConfig(.init(fontSize: 14))
+            first.textSizeChoice = .large
+
+            // Launch with the key removed, then add the same size back.
+            let second = VerticalTabsSettings(defaults: defaults)
+            second.applyConfig(.init())
+            second.applyConfig(.init(fontSize: 14))
+            #expect(second.textSizeChoice == nil)
+            #expect(second.fontSize == 14)
+        }
+    }
+
     @Test func reloadPicksUpTextSizeOverride() {
         withFreshDefaults { defaults in
             let running = VerticalTabsSettings(defaults: defaults)

@@ -95,13 +95,15 @@ final class VerticalTabsSettings: ObservableObject {
     /// from the menu's size, unless a preset was picked over that same size;
     /// removing it falls back to the menu's size.
     func applyConfig(_ values: ConfigValues) {
+        // Also at a launch without one, so a later same-size key isn't overridden.
+        if values.fontSize == nil { defaults.removeObject(forKey: Key.textSizeOverrides) }
         guard values != config else { return }
         let fontChanged = values.fontSize != config.fontSize
         config = values
         guard fontChanged else { return }
         let overridden = defaults.object(forKey: Key.textSizeOverrides) as? Double
         useConfigFontSize = values.fontSize.map { Double($0) != overridden } ?? false
-        if useConfigFontSize || values.fontSize == nil { defaults.removeObject(forKey: Key.textSizeOverrides) }
+        if useConfigFontSize { defaults.removeObject(forKey: Key.textSizeOverrides) }
     }
 
     /// The Text Size menu's choice: nil is the configured size.
