@@ -222,12 +222,15 @@ final class VerticalTabsManager: NSObject {
     /// kept in Recents (if it was selected from there); the rest settle back.
     /// `entered` ties the check to this visit: an A→B→A walk's first timer
     /// must not settle the second, shorter visit to A. The deadline counts from
-    /// `entered`, so rescheduling after a dwell change keeps the visit's start.
+    /// `entered`, so rescheduling after a dwell change keeps the visit's start,
+    /// and a callback fires only once the current dwell has passed.
     private func settleWalk(in host: VerticalTabsGroupHost, on window: TerminalWindow, enteredAt entered: Date) {
         let delay = max(0, recentsDwell - Date().timeIntervalSince(entered))
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak host, weak window] in
+            // A callback from before a dwell increase is early; the rescheduled one settles.
             guard let self, let host, let window, host.lastSelectedWindow === window,
-                  self.tracker(for: window).lastEntered == entered else { return }
+                  self.trackers[ObjectIdentifier(window)]?.lastEntered == entered,
+                  Date().timeIntervalSince(entered) >= self.recentsDwell - 0.01 else { return }
             let id = ObjectIdentifier(window)
             let settled: Set<ObjectIdentifier> = host.keptRecents.contains(id) ? [id] : []
             guard settled != host.keptRecents else { return }
