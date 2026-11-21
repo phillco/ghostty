@@ -358,18 +358,20 @@ private struct VerticalTabRowView: View {
     }
 
     /// Drops the pill, then the age, before the title shrinks below
-    /// `titleMinWidth` (the tooltip keeps both); never wider than the sidebar.
+    /// `titleMinWidth` (the tooltip keeps both), and the icon last, so a row
+    /// fits even the narrowest sidebar at the largest text size.
     private var compact: some View {
         ViewThatFits(in: .horizontal) {
             if folder != nil { compactRow(pill: true, age: true, titleMin: true) }
             compactRow(pill: false, age: true, titleMin: true)
             compactRow(pill: false, age: false, titleMin: false)
+            if style.showIcons { compactRow(pill: false, age: false, titleMin: false, icon: false) }
         }
     }
 
-    private func compactRow(pill: Bool, age showAge: Bool, titleMin: Bool) -> some View {
+    private func compactRow(pill: Bool, age showAge: Bool, titleMin: Bool, icon: Bool = true) -> some View {
         HStack(spacing: style.metrics.itemSpacing) {
-            if style.showIcons { glyph }
+            if icon, style.showIcons { glyph }
             title(minWidth: titleMin ? style.metrics.titleMinWidth : 0)
             Spacer(minLength: style.metrics.spacerMin)
             if row.bell { bell }
