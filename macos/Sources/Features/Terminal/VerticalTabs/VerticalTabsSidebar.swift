@@ -106,7 +106,7 @@ struct VerticalTabsSidebar: View {
 
     private var stack: some View {
         ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
                 if isFiltering {
                     rows(store.filteredRows, section: nil, move: nil)
                 } else {
@@ -138,8 +138,9 @@ struct VerticalTabsSidebar: View {
             .font(.system(size: max(10, settings.secondaryFontSize), weight: .semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6)
-            .padding(.top, 8)
-            .padding(.bottom, 3)
+            // With the stack's 2pt spacing: 8pt above (below a row), 3pt below.
+            .padding(.top, 6)
+            .padding(.bottom, 1)
     }
 
     private var recentsHeader: some View {
@@ -266,7 +267,7 @@ private struct VerticalTabRowStyle: Equatable {
     let showShortcuts: Bool
     let showIcons: Bool
 
-    var minRowHeight: CGFloat { fontSize + 9 }
+    var minRowHeight: CGFloat { fontSize + 13 }
 }
 
 private struct VerticalTabRowView: View {
@@ -289,10 +290,10 @@ private struct VerticalTabRowView: View {
             case .tall: tall
             }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, minHeight: style.minRowHeight, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Color.primary.opacity(row.isSelected ? 0.11 : hovering ? 0.05 : 0))
         )
         .overlay(alignment: dropAfter ? .bottom : .top) { dropIndicator }
@@ -319,16 +320,17 @@ private struct VerticalTabRowView: View {
             Capsule()
                 .fill(Color.accentColor)
                 .frame(height: 2)
-                .offset(y: dropAfter ? 1 : -1)
+                // Centered in the stack's 2pt gap between rows.
+                .offset(y: dropAfter ? 2 : -2)
                 .allowsHitTesting(false)
         }
     }
 
     private var compact: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             if style.showIcons { glyph }
             title
-            Spacer(minLength: 2)
+            Spacer(minLength: 4)
             if row.bell { bell }
             if let folder { FolderPill(folder: folder, style: style) }
             trailing
@@ -336,7 +338,7 @@ private struct VerticalTabRowView: View {
     }
 
     private var tall: some View {
-        HStack(alignment: .center, spacing: 4) {
+        HStack(alignment: .center, spacing: 6) {
             if style.showIcons { glyph }
             VStack(alignment: .leading, spacing: 2) {
                 title
@@ -348,7 +350,7 @@ private struct VerticalTabRowView: View {
                     }
                 }
             }
-            Spacer(minLength: 2)
+            Spacer(minLength: 4)
             closeOrShortcut
         }
         .padding(.vertical, 2)
@@ -462,8 +464,8 @@ private struct FolderPill: View {
                 .font(.system(size: style.secondarySize, weight: .medium))
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 0.5)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
                 .foregroundStyle(Color(hue: hue, saturation: 0.35, brightness: 0.95))
                 .background(
                     Capsule().fill(Color(hue: hue, saturation: 0.5, brightness: 0.6).opacity(0.25))

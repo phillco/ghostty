@@ -18,9 +18,9 @@ final class VerticalTabsSettings: ObservableObject {
         /// Title point size; secondary text and icons scale from it.
         var pointSize: CGFloat {
             switch self {
-            case .small: return 11
-            case .medium: return 13
-            case .large: return 15
+            case .small: return 12
+            case .medium: return 14
+            case .large: return 16
             }
         }
     }
@@ -125,7 +125,7 @@ final class VerticalTabsSettings: ObservableObject {
     }
 
     var secondaryFontSize: CGFloat {
-        config.secondaryFontSize ?? max(9, fontSize - 2)
+        config.secondaryFontSize ?? max(9, fontSize - 3.5)
     }
 
     /// `14pt`, `14.5pt`.

@@ -3468,7 +3468,7 @@ keybind: Keybinds = .{},
 
 /// macOS only. Font size, in points, of the vertical tabs sidebar's secondary
 /// text: folder pills, idle times, shortcuts and icons. `0` (the default)
-/// derives it from the title size (two points smaller, at least 9). Other
+/// derives it from the title size (3.5 points smaller, at least 9). Other
 /// values are clamped to 7–28. Changes apply on config reload.
 @"vertical-tabs-secondary-font-size": f64 = 0,
 

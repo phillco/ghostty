@@ -274,8 +274,8 @@ struct VerticalTabsModelTests {
             let settings = VerticalTabsSettings(defaults: defaults)
             #expect(settings.density == .compact)
             #expect(settings.textSize == .medium)
-            #expect(settings.fontSize == 13)
-            #expect(settings.secondaryFontSize == 11)
+            #expect(settings.fontSize == 14)
+            #expect(settings.secondaryFontSize == 10.5)
             #expect(settings.config == .init())
             #expect(settings.showFolders)
             #expect(settings.showIdleTime)
@@ -296,7 +296,7 @@ struct VerticalTabsModelTests {
     }
 
     @Test func textSizePoints() {
-        #expect(VerticalTabsSettings.TextSize.allCases.map(\.pointSize) == [11, 13, 15])
+        #expect(VerticalTabsSettings.TextSize.allCases.map(\.pointSize) == [12, 14, 16])
     }
 
     @Test func configPointSizes() {
@@ -325,21 +325,21 @@ struct VerticalTabsModelTests {
             settings.textSize = .large
 
             // Setting the key takes over from the menu.
-            settings.applyConfig(.init(fontSize: 14))
+            settings.applyConfig(.init(fontSize: 13))
             #expect(settings.textSizeChoice == nil)
-            #expect(settings.fontSize == 14)
-            #expect(settings.secondaryFontSize == 12)
+            #expect(settings.fontSize == 13)
+            #expect(settings.secondaryFontSize == 9.5)
 
             // The menu overrides it, and an unrelated reload keeps that choice.
             settings.textSizeChoice = .small
-            #expect(settings.fontSize == 11)
+            #expect(settings.fontSize == 12)
             #expect(settings.textSize == .small)
-            settings.applyConfig(.init(fontSize: 14, recentsLimit: 2))
-            #expect(settings.fontSize == 11)
+            settings.applyConfig(.init(fontSize: 13, recentsLimit: 2))
+            #expect(settings.fontSize == 12)
 
             // Choosing Config again, or changing the key, re-selects it.
             settings.textSizeChoice = nil
-            #expect(settings.fontSize == 14)
+            #expect(settings.fontSize == 13)
             settings.textSizeChoice = .medium
             settings.applyConfig(.init(fontSize: 16, recentsLimit: 2))
             #expect(settings.textSizeChoice == nil)
@@ -348,17 +348,17 @@ struct VerticalTabsModelTests {
             // Removing the key falls back to the persisted menu size.
             settings.applyConfig(.init())
             #expect(settings.textSizeChoice == .medium)
-            #expect(settings.fontSize == 13)
+            #expect(settings.fontSize == 14)
             #expect(VerticalTabsSettings(defaults: defaults).textSize == .medium)
 
             // A preset picked over a configured size survives a restart at that size,
             // but a different configured size takes over again.
-            settings.applyConfig(.init(fontSize: 14))
+            settings.applyConfig(.init(fontSize: 13))
             settings.textSizeChoice = .large
             let restarted = VerticalTabsSettings(defaults: defaults)
-            restarted.applyConfig(.init(fontSize: 14))
+            restarted.applyConfig(.init(fontSize: 13))
             #expect(restarted.textSizeChoice == .large)
-            #expect(restarted.fontSize == 15)
+            #expect(restarted.fontSize == 16)
             let changed = VerticalTabsSettings(defaults: defaults)
             changed.applyConfig(.init(fontSize: 18))
             #expect(changed.textSizeChoice == nil)
@@ -368,43 +368,43 @@ struct VerticalTabsModelTests {
 
             // Config can't be chosen without a configured size.
             settings.textSizeChoice = nil
-            #expect(settings.fontSize == 13)
+            #expect(settings.fontSize == 14)
         }
     }
 
     @Test func overrideClearedAtLaunchWithoutConfiguredSize() {
         withFreshDefaults { defaults in
             let first = VerticalTabsSettings(defaults: defaults)
-            first.applyConfig(.init(fontSize: 14))
+            first.applyConfig(.init(fontSize: 13))
             first.textSizeChoice = .large
 
             // Launch with the key removed, then add the same size back.
             let second = VerticalTabsSettings(defaults: defaults)
             second.applyConfig(.init())
-            second.applyConfig(.init(fontSize: 14))
+            second.applyConfig(.init(fontSize: 13))
             #expect(second.textSizeChoice == nil)
-            #expect(second.fontSize == 14)
+            #expect(second.fontSize == 13)
         }
     }
 
     @Test func reloadPicksUpTextSizeOverride() {
         withFreshDefaults { defaults in
             let running = VerticalTabsSettings(defaults: defaults)
-            running.applyConfig(.init(fontSize: 14))
+            running.applyConfig(.init(fontSize: 13))
             #expect(running.textSizeChoice == nil)
 
             // Another process picks a preset over the same configured size, then clears it.
             let other = VerticalTabsSettings(defaults: defaults)
-            other.applyConfig(.init(fontSize: 14))
+            other.applyConfig(.init(fontSize: 13))
             other.textSizeChoice = .large
             running.reloadFromDefaults()
             #expect(running.textSizeChoice == .large)
-            #expect(running.fontSize == 15)
+            #expect(running.fontSize == 16)
 
             other.textSizeChoice = nil
             running.reloadFromDefaults()
             #expect(running.textSizeChoice == nil)
-            #expect(running.fontSize == 14)
+            #expect(running.fontSize == 13)
         }
     }
 
@@ -417,7 +417,7 @@ struct VerticalTabsModelTests {
             #expect(settings.fontSize == 20)
             #expect(settings.secondaryFontSize == 10)
             settings.applyConfig(.init(secondaryFontSize: 12))
-            #expect(settings.fontSize == 11)
+            #expect(settings.fontSize == 12)
             #expect(settings.secondaryFontSize == 12)
         }
     }
