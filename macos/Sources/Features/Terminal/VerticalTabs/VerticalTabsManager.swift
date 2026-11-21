@@ -17,6 +17,7 @@ final class VerticalTabsManager: NSObject {
     private var hosts: [ObjectIdentifier: VerticalTabsGroupHost] = [:]
     private var trackers: [ObjectIdentifier: WindowTracker] = [:]
     private var observers: [NSObjectProtocol] = []
+    private var distributedObservers: [NSObjectProtocol] = []
     private var ageTimer: Timer?
     private var recentsCancellable: AnyCancellable?
     private var started = false
@@ -60,6 +61,22 @@ final class VerticalTabsManager: NSObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(250)) { self?.refreshAll() }
         })
 
+        // A sibling tab doesn't lay out at the new size until it's selected, so
+        // its PTY resize (and the agent's full redraw) would land on screen.
+        observers.append(center.addObserver(
+            forName: NSWindow.didEndLiveResizeNotification, object: nil, queue: .main
+        ) { [weak self] n in
+            guard let window = n.object as? TerminalWindow else { return }
+            self?.syncSiblingFrames(of: window)
+        })
+
+        // `ghostty-test-mirror` rewrites our prefs while we run, then posts this.
+        distributedObservers.append(DistributedNotificationCenter.default().addObserver(
+            forName: Self.reloadPrefsNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.reloadPrefs()
+        })
+
         // Collapsing or hiding Recents moves its tabs back into Open (and renumbers them).
         recentsCancellable = settings.$recentsCollapsed.combineLatest(settings.$showRecents)
             .dropFirst()
@@ -69,16 +86,27 @@ final class VerticalTabsManager: NSObject {
         if isEnabled { applyEnabled() }
     }
 
+    /// Posted (distributed) by tools that write our `VerticalTabs*` defaults.
+    static let reloadPrefsNotification = Notification.Name(
+        "\(Bundle.main.bundleIdentifier ?? "io.phillip.ghostty-phil").vertical-tabs.reload-prefs")
+
+    func reloadPrefs() {
+        settings.reloadFromDefaults()
+        applyEnabled()
+    }
+
     func toggle() {
         settings.enabled.toggle()
         applyEnabled()
     }
 
     private func applyEnabled() {
+        hosts.values.forEach { $0.setSidebarWidth(settings.width) }
         for window in terminalWindows {
             window.terminalViewContainerForVerticalTabs?.leadingInset = leadingInset(for: window)
             syncTabBar(of: window)
         }
+        layOutBackgroundTabs()
 
         if isEnabled {
             ageTimer?.invalidate()
@@ -144,8 +172,41 @@ final class VerticalTabsManager: NSObject {
         if window.terminalViewContainerForVerticalTabs?.leadingInset != inset {
             window.terminalViewContainerForVerticalTabs?.leadingInset = inset
         }
-        host.attach(to: window)
+        // Rows first, then the move: the sidebar's first frame in this window
+        // already shows this tab selected.
         host.refresh()
+    }
+
+    /// Lays out tabs that aren't on screen, one per runloop turn, so their
+    /// surfaces resize (and their PTYs get SIGWINCH) now rather than when
+    /// they're next selected.
+    private func layOutBackgroundTabs() {
+        let hidden = terminalWindows.filter { window in
+            guard let group = window.tabGroup else { return false }
+            return group.selectedWindow !== window
+        }
+        for window in hidden {
+            DispatchQueue.main.async { [weak window] in
+                guard let window, window.tabGroup?.selectedWindow !== window else { return }
+                window.contentView?.layoutSubtreeIfNeeded()
+            }
+        }
+    }
+
+    /// After a live resize, gives the window's sibling tabs its frame (AppKit
+    /// otherwise applies it on selection) and lays them out in the background.
+    private func syncSiblingFrames(of window: TerminalWindow) {
+        guard window.styleMask.contains(.fullScreen) == false,
+              let siblings = window.tabGroup?.windows, siblings.count > 1 else { return }
+        let frame = window.frame
+        for sibling in siblings where sibling !== window {
+            DispatchQueue.main.async { [weak sibling, weak window] in
+                guard let sibling, let window, sibling.tabGroup === window.tabGroup,
+                      sibling.tabGroup?.selectedWindow !== sibling else { return }
+                if sibling.frame != frame { sibling.setFrame(frame, display: false) }
+                sibling.contentView?.layoutSubtreeIfNeeded()
+            }
+        }
     }
 
     private func host(for tabGroup: NSWindowTabGroup) -> VerticalTabsGroupHost {
@@ -206,6 +267,7 @@ final class VerticalTabsManager: NSObject {
             window.terminalViewContainerForVerticalTabs?.leadingInset = leadingInset(for: window)
         }
         refreshAll()
+        layOutBackgroundTabs()
     }
 
     // MARK: Menu

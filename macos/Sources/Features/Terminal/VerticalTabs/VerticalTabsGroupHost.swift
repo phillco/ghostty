@@ -10,7 +10,7 @@ struct VerticalTabRow: Identifiable, Equatable {
     let bell: Bool
     let age: String?
     let shortcut: Int?
-    let isSelected: Bool
+    var isSelected: Bool
     let isPinned: Bool
 }
 
@@ -25,6 +25,15 @@ final class VerticalTabsStore: ObservableObject {
     @Published var renamingID: ObjectIdentifier?
     /// Bumped to move keyboard focus into the filter field.
     @Published var filterFocusRequest: Int = 0
+    /// The row being dragged to reorder, and where it would land.
+    var draggingID: ObjectIdentifier?
+    @Published var dropTarget: DropTarget?
+
+    struct DropTarget: Equatable {
+        let id: ObjectIdentifier
+        /// Lands after the target row rather than before it.
+        let after: Bool
+    }
 
     weak var host: VerticalTabsGroupHost?
 
@@ -34,6 +43,21 @@ final class VerticalTabsStore: ObservableObject {
         let ids = VerticalTabs.filtered(host.sections, filter: filter).map(\.id)
         let all = Dictionary((pinned + recents + open).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         return ids.compactMap { all[$0] }
+    }
+
+    /// Moves the selection highlight now, before the window switch catches up.
+    func markSelected(_ id: ObjectIdentifier) {
+        func mark(_ rows: [VerticalTabRow]) -> [VerticalTabRow] {
+            rows.map { row in
+                var row = row
+                row.isSelected = row.id == id
+                return row
+            }
+        }
+        let (p, r, o) = (mark(pinned), mark(recents), mark(open))
+        if p != pinned { pinned = p }
+        if r != recents { recents = r }
+        if o != open { open = o }
     }
 }
 
@@ -59,6 +83,9 @@ final class VerticalTabsGroupHost {
     weak var lastSelectedWindow: TerminalWindow?
     /// The selected tab, when it was selected from Recents: it stays in Recents.
     var keptRecent: ObjectIdentifier?
+    /// A tab clicked in the sidebar that AppKit hasn't selected yet. Refreshes
+    /// in between keep showing it selected, so the highlight never bounces back.
+    private var pendingSelection: ObjectIdentifier?
 
     init(tabGroup: NSWindowTabGroup, manager: VerticalTabsManager) {
         self.tabGroup = tabGroup
@@ -88,10 +115,14 @@ final class VerticalTabsGroupHost {
 
     // MARK: Placement
 
-    /// Moves the sidebar into `window`'s container (the selected tab).
+    /// Moves the sidebar into `window`'s container (the selected tab), laid out
+    /// before the next frame so it never shows a stale or unsized sidebar.
     func attach(to window: TerminalWindow) {
         guard let container = window.terminalViewContainerForVerticalTabs else { return }
         guard hostingView.superview !== container else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         hostingView.removeFromSuperview()
         container.addSubview(hostingView)
         widthConstraint.constant = manager.settings.width
@@ -100,6 +131,7 @@ final class VerticalTabsGroupHost {
             hostingView.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
             hostingView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
+        container.layoutSubtreeIfNeeded()
     }
 
     func setSidebarWidth(_ width: CGFloat) {
@@ -124,11 +156,11 @@ final class VerticalTabsGroupHost {
     func refresh(enforceOrder: Bool = true) {
         guard let tabGroup else { return }
         let windows = tabGroup.windows.compactMap { $0 as? TerminalWindow }
-        let selected = tabGroup.selectedWindow
-
-        if let selected = selected as? TerminalWindow, hostingView.window !== selected {
-            attach(to: selected)
+        let selectedWindow = tabGroup.selectedWindow
+        if let pending = pendingSelection, !windows.contains(where: { ObjectIdentifier($0) == pending }) {
+            pendingSelection = nil
         }
+        let selectedID = pendingSelection ?? selectedWindow.map(ObjectIdentifier.init)
 
         windowsByID = Dictionary(uniqueKeysWithValues: windows.map { (ObjectIdentifier($0), $0) })
         let width = manager.settings.width
@@ -148,7 +180,7 @@ final class VerticalTabsGroupHost {
                 folder: VerticalTabs.folderName(forPath: pwd),
                 platform: platform.shown,
                 bell: controller?.bell ?? false,
-                isSelected: window === selected,
+                isSelected: ObjectIdentifier(window) == selectedID,
                 lastLeft: tracker.lastLeft,
                 lastActive: tracker.lastActive ?? tracker.lastLeft,
                 claimedPinKey: tracker.claimedPinKey
@@ -193,6 +225,12 @@ final class VerticalTabsGroupHost {
         if store.pinned != pinnedRows { store.pinned = pinnedRows }
         if store.recents != recentRows { store.recents = recentRows }
         if store.open != openRows { store.open = openRows }
+
+        // Rows first: the sidebar's first frame in a newly selected tab is current.
+        if pendingSelection == nil, let selected = selectedWindow as? TerminalWindow,
+           hostingView.window !== selected {
+            attach(to: selected)
+        }
     }
 
     /// Keeps pins attached to their tab: records which key each tab matched and
@@ -233,13 +271,18 @@ final class VerticalTabsGroupHost {
     func select(_ id: ObjectIdentifier) {
         guard let window = windowsByID[id] else { return }
         if !store.filter.isEmpty { store.filter = "" }
-        // Switch after the current SwiftUI event so the sidebar isn't reparented
-        // mid-event, then hand keyboard focus to the terminal.
-        DispatchQueue.main.async {
+        // Highlight now; switch after the current SwiftUI event so the sidebar
+        // isn't reparented mid-event, then hand keyboard focus to the terminal.
+        store.markSelected(id)
+        pendingSelection = id
+        DispatchQueue.main.async { [weak self] in
+            self?.pendingSelection = nil
             window.makeKeyAndOrderFront(nil)
             if let surface = window.terminalController?.focusedSurface {
                 window.makeFirstResponder(surface)
             }
+            // Also covers a switch AppKit refused or that posted no notification.
+            self?.refresh()
         }
     }
 

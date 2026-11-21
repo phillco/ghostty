@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The vertical tab sidebar: filter, Pinned / Recents / Open sections, and a
 /// draggable divider on its trailing edge.
@@ -79,62 +80,62 @@ struct VerticalTabsSidebar: View {
 
     // MARK: List
 
-    private var selection: Binding<ObjectIdentifier?> {
-        Binding(
-            get: { (store.pinned + store.recents + store.open).first(where: \.isSelected)?.id },
-            set: { id in if let id { store.host?.select(id) } }
-        )
-    }
-
     private var isFiltering: Bool {
         !store.filter.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// A plain stack rather than `List`: `NSTableView` animates selection and
+    /// redraws its highlight when the sidebar moves between tab windows.
     private var list: some View {
-        List(selection: selection) {
-            if isFiltering {
-                ForEach(store.filteredRows) { row($0) }
-            } else {
-                if !store.pinned.isEmpty {
-                    Section {
-                        ForEach(store.pinned) { row($0) }
-                            .onMove { store.host?.movePinned(fromOffsets: $0, toOffset: $1) }
-                    } header: {
-                        Text("Pinned")
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: 0) {
+                if isFiltering {
+                    rows(store.filteredRows, move: nil)
+                } else {
+                    if !store.pinned.isEmpty {
+                        sectionHeader { Text("Pinned") }
+                        rows(store.pinned) { store.host?.movePinned(fromOffsets: $0, toOffset: $1) }
                     }
-                }
 
-                if store.hasRecents {
-                    Section {
+                    if store.hasRecents {
+                        sectionHeader { recentsHeader }
                         if !settings.recentsCollapsed {
-                            ForEach(store.recents) { row($0) }
+                            rows(store.recents, move: nil)
                         }
-                    } header: {
-                        Button {
-                            settings.recentsCollapsed.toggle()
-                        } label: {
-                            HStack(spacing: 3) {
-                                Image(systemName: settings.recentsCollapsed ? "chevron.right" : "chevron.down")
-                                    .font(.system(size: 8, weight: .bold))
-                                Text("Recents")
-                            }
-                        }
-                        .buttonStyle(.plain)
                     }
-                }
 
-                Section {
-                    ForEach(store.open) { row($0) }
-                        .onMove { store.host?.moveOpen(fromOffsets: $0, toOffset: $1) }
-                } header: {
-                    Text("Open Tabs")
+                    sectionHeader { Text("Open Tabs") }
+                    rows(store.open) { store.host?.moveOpen(fromOffsets: $0, toOffset: $1) }
                 }
             }
+            .padding(.horizontal, 6)
+            .padding(.bottom, 6)
         }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
-        // Tall rows grow from their second line; one without metadata stays compact.
-        .environment(\.defaultMinListRowHeight, rowStyle.minRowHeight)
+        // Row and section changes land in one frame, never animated.
+        .transaction { $0.animation = nil }
+    }
+
+    private func sectionHeader<Label: View>(@ViewBuilder _ label: () -> Label) -> some View {
+        label()
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.top, 8)
+            .padding(.bottom, 3)
+    }
+
+    private var recentsHeader: some View {
+        Button {
+            settings.recentsCollapsed.toggle()
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: settings.recentsCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                Text("Recents")
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var rowStyle: VerticalTabRowStyle {
@@ -147,10 +148,27 @@ struct VerticalTabsSidebar: View {
             showIcons: settings.showIcons)
     }
 
+    /// - Parameter move: reorders this section (`onMove` offsets); nil when it can't be reordered.
+    @ViewBuilder
+    private func rows(_ rows: [VerticalTabRow], move: ((IndexSet, Int) -> Void)?) -> some View {
+        ForEach(rows) { row in
+            let view = self.row(row)
+            if let move {
+                view
+                    .onDrag {
+                        store.draggingID = row.id
+                        return NSItemProvider(object: VerticalTabsDrop.marker as NSString)
+                    }
+                    .onDrop(of: [.text], delegate: VerticalTabsDrop(
+                        target: row.id, section: rows.map(\.id), store: store, move: move))
+            } else {
+                view
+            }
+        }
+    }
+
     private func row(_ row: VerticalTabRow) -> some View {
         VerticalTabRowView(row: row, store: store, style: rowStyle)
-            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
-            .tag(row.id)
             .contextMenu {
                 Button(row.isPinned ? "Unpin Tab" : "Pin Tab") { store.host?.togglePin(row.id) }
                 Button("Rename Tab…") { store.renamingID = row.id }
@@ -239,10 +257,34 @@ private struct VerticalTabRowView: View {
             case .tall: tall
             }
         }
+        .padding(.horizontal, 6)
+        .frame(maxWidth: .infinity, minHeight: style.minRowHeight, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.primary.opacity(row.isSelected ? 0.11 : hovering ? 0.05 : 0))
+        )
+        .overlay(alignment: dropAfter ? .bottom : .top) { dropIndicator }
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .onTapGesture {
+            guard store.renamingID != row.id else { return }
+            store.host?.select(row.id)
+        }
         .overlay(MiddleClickCatcher { store.host?.close(row.id) })
         .help(row.folder.map { "\(row.title) — \($0)" } ?? row.title)
+    }
+
+    private var dropAfter: Bool { store.dropTarget?.after ?? false }
+
+    @ViewBuilder
+    private var dropIndicator: some View {
+        if store.dropTarget?.id == row.id {
+            Capsule()
+                .fill(Color.accentColor)
+                .frame(height: 2)
+                .offset(y: dropAfter ? 1 : -1)
+                .allowsHitTesting(false)
+        }
     }
 
     private var compact: some View {
@@ -422,5 +464,49 @@ private struct MiddleClickCatcher: NSViewRepresentable {
             guard event.buttonNumber == 2 else { return }
             action?()
         }
+    }
+}
+
+/// Drag-to-reorder within one section. The dragged row's ID lives in the
+/// store; the pasteboard only carries a marker.
+private struct VerticalTabsDrop: DropDelegate {
+    static let marker = "ghostty-vertical-tab"
+
+    let target: ObjectIdentifier
+    /// The section's row IDs, in order.
+    let section: [ObjectIdentifier]
+    let store: VerticalTabsStore
+    let move: (IndexSet, Int) -> Void
+
+    private var offsets: (from: Int, to: Int)? {
+        guard let dragging = store.draggingID, let from = section.firstIndex(of: dragging),
+              let to = section.firstIndex(of: target) else { return nil }
+        return (from, to)
+    }
+
+    func validateDrop(info: DropInfo) -> Bool { offsets != nil }
+
+    func dropEntered(info: DropInfo) {
+        guard let offsets, offsets.from != offsets.to else { return }
+        let next = VerticalTabsStore.DropTarget(id: target, after: offsets.from < offsets.to)
+        if store.dropTarget != next { store.dropTarget = next }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: offsets == nil ? .forbidden : .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        if store.dropTarget?.id == target { store.dropTarget = nil }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let offsets = offsets
+        store.dropTarget = nil
+        store.draggingID = nil
+        guard let offsets, offsets.from != offsets.to else { return false }
+        // `onMove` semantics: insert before the destination offset.
+        move(IndexSet(integer: offsets.from), offsets.from < offsets.to ? offsets.to + 1 : offsets.to)
+        return true
     }
 }
