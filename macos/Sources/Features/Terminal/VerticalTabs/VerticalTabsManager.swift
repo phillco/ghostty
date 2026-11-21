@@ -106,6 +106,14 @@ final class VerticalTabsManager: NSObject {
         settings.applyConfig(.init(config))
         // Fonts redraw through `settings`; Recents' size changes the sections.
         if settings.config.recentsLimit != old.recentsLimit { refreshAll() }
+        // A walk in progress settles on the new dwell, not the one it started with.
+        if settings.config.recentsDwell != old.recentsDwell {
+            for host in hosts.values {
+                guard let window = host.lastSelectedWindow,
+                      let entered = trackers[ObjectIdentifier(window)]?.lastEntered else { continue }
+                settleWalk(in: host, on: window, enteredAt: entered)
+            }
+        }
     }
 
     /// Posted (distributed) by tools that write our `VerticalTabs*` defaults.
@@ -213,9 +221,11 @@ final class VerticalTabsManager: NSObject {
     /// Once a quick walk rests on `window` for the dwell time, only it stays
     /// kept in Recents (if it was selected from there); the rest settle back.
     /// `entered` ties the check to this visit: an A→B→A walk's first timer
-    /// must not settle the second, shorter visit to A.
+    /// must not settle the second, shorter visit to A. The deadline counts from
+    /// `entered`, so rescheduling after a dwell change keeps the visit's start.
     private func settleWalk(in host: VerticalTabsGroupHost, on window: TerminalWindow, enteredAt entered: Date) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + recentsDwell) { [weak self, weak host, weak window] in
+        let delay = max(0, recentsDwell - Date().timeIntervalSince(entered))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak host, weak window] in
             guard let self, let host, let window, host.lastSelectedWindow === window,
                   self.tracker(for: window).lastEntered == entered else { return }
             let id = ObjectIdentifier(window)
