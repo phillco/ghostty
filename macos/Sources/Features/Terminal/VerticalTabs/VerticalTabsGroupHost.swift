@@ -325,6 +325,7 @@ final class VerticalTabsGroupHost {
         guard desired.count == tabGroup.windows.count,
               tabGroup.windows.map(ObjectIdentifier.init) != order else { return }
         let selected = tabGroup.selectedWindow
+        let wasKey = selected?.isKeyWindow ?? false
         isReordering = true
         defer { isReordering = false }
 
@@ -340,7 +341,10 @@ final class VerticalTabsGroupHost {
             tabGroup.removeWindow(window)
             previous.addTabbedWindowSafely(window, ordered: .above)
         }
-        selected?.makeKeyAndOrderFront(nil)
+        if let selected {
+            tabGroup.selectedWindow = selected
+            if wasKey { selected.makeKeyAndOrderFront(nil) }
+        }
         NSAnimationContext.endGrouping()
 
         (selected?.windowController as? TerminalController)?.relabelTabs()
