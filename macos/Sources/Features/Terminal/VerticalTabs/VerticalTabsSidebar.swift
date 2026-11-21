@@ -270,6 +270,8 @@ struct VerticalTabsMetrics: Equatable {
     var itemSpacing: CGFloat { (fontSize * 0.42).rounded() }
     var spacerMin: CGFloat { max(3, (fontSize * 0.28).rounded()) }
     var cornerRadius: CGFloat { (fontSize * 0.48).rounded() }
+    /// About three characters and an ellipsis.
+    var titleMinWidth: CGFloat { (fontSize * 2.5).rounded() }
     var pillHorizontalPadding: CGFloat { (secondarySize * 0.48).rounded() }
     var pillVerticalPadding: CGFloat { max(1, (secondarySize * 0.14).rounded()) }
     /// A section header's own padding; with the neighboring rows' half gaps the
@@ -321,9 +323,6 @@ private struct VerticalTabRowView: View {
                 .fill(Color.primary.opacity(row.isSelected ? 0.11 : hovering ? 0.05 : 0))
         )
         .overlay(alignment: dropAfter ? .bottom : .top) { dropIndicator }
-        // The gap between rows belongs to their drop targets, so dropping on
-        // the indicator line never lands outside a row.
-        .padding(.vertical, style.metrics.rowGap / 2)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture {
@@ -337,6 +336,11 @@ private struct VerticalTabRowView: View {
         .accessibilityAction(named: "Close Tab") { store.host?.close(row.id) }
         .overlay(MiddleClickCatcher { store.host?.close(row.id) })
         .help(row.folder.map { "\(row.title) — \($0)" } ?? row.title)
+        // The gap between rows belongs to their drag and drop targets (outside
+        // hover, clicks and middle-click close), so dropping on the indicator
+        // line never lands outside a row.
+        .padding(.vertical, style.metrics.rowGap / 2)
+        .contentShape(Rectangle())
     }
 
     private var dropAfter: Bool { store.dropTarget?.after ?? false }
@@ -353,14 +357,24 @@ private struct VerticalTabRowView: View {
         }
     }
 
+    /// Drops the pill, then the age, before the title shrinks below
+    /// `titleMinWidth` (the tooltip keeps both); never wider than the sidebar.
     private var compact: some View {
+        ViewThatFits(in: .horizontal) {
+            if folder != nil { compactRow(pill: true, age: true, titleMin: true) }
+            compactRow(pill: false, age: true, titleMin: true)
+            compactRow(pill: false, age: false, titleMin: false)
+        }
+    }
+
+    private func compactRow(pill: Bool, age showAge: Bool, titleMin: Bool) -> some View {
         HStack(spacing: style.metrics.itemSpacing) {
             if style.showIcons { glyph }
-            title
+            title(minWidth: titleMin ? style.metrics.titleMinWidth : 0)
             Spacer(minLength: style.metrics.spacerMin)
             if row.bell { bell }
-            if let folder { FolderPill(folder: folder, style: style) }
-            trailing
+            if pill, let folder { FolderPill(folder: folder, style: style) }
+            trailing(age: showAge)
         }
     }
 
@@ -368,7 +382,7 @@ private struct VerticalTabRowView: View {
         HStack(alignment: .center, spacing: style.metrics.itemSpacing) {
             if style.showIcons { glyph }
             VStack(alignment: .leading, spacing: 2) {
-                title
+                title(minWidth: 0)
                 if folder != nil || row.bell || age != nil {
                     HStack(spacing: style.metrics.itemSpacing) {
                         if let folder { FolderPill(folder: folder, style: style) }
@@ -384,7 +398,7 @@ private struct VerticalTabRowView: View {
     }
 
     @ViewBuilder
-    private var title: some View {
+    private func title(minWidth: CGFloat) -> some View {
         if store.renamingID == row.id {
             TextField("Tab title", text: $renameText)
                 .textFieldStyle(.plain)
@@ -404,6 +418,8 @@ private struct VerticalTabRowView: View {
                 .font(.system(size: style.fontSize, weight: row.isSelected ? .semibold : .regular))
                 .lineLimit(1)
                 .truncationMode(.tail)
+                // The ideal width too, so `ViewThatFits` measures the minimum.
+                .frame(minWidth: minWidth, idealWidth: minWidth > 0 ? minWidth : nil, alignment: .leading)
         }
     }
 
@@ -440,11 +456,11 @@ private struct VerticalTabRowView: View {
     }
 
     @ViewBuilder
-    private var trailing: some View {
+    private func trailing(age showAge: Bool) -> some View {
         if hovering {
             closeButton
         } else {
-            if let age { ageText(age) }
+            if showAge, let age { ageText(age) }
             shortcut
         }
     }

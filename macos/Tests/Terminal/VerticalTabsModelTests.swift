@@ -311,6 +311,7 @@ struct VerticalTabsModelTests {
         #expect(all.map(\.itemSpacing) == [5, 6, 7, 8])
         #expect(all.map(\.spacerMin) == [3, 4, 4, 5])
         #expect(all.map(\.cornerRadius) == [6, 7, 8, 9])
+        #expect(all.map(\.titleMinWidth) == [30, 35, 40, 45])
         #expect(all.map(\.pillHorizontalPadding) == [4, 5, 6, 7])
         #expect(all.map(\.pillVerticalPadding) == [1, 1, 2, 2])
         // With the rows' half gaps: ~0.55em above a header, ~0.2em below it.
