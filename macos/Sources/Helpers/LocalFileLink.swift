@@ -99,13 +99,13 @@ struct LocalFileLink: Equatable {
             if let type, type.conforms(to: .bundle) || type.conforms(to: .package) { return .reveal }
             return .defaultApplication
         }
-        if line != nil { return .editor }
-        if let type, type.conforms(to: .html) { return .defaultApplication }
+        if let type, type.conforms(to: .html) { return line != nil ? .editor : .defaultApplication }
         // Scripts conform to plain text, so check text before executables.
         if let type, type.conforms(to: .text) { return .editor }
         // Extensionless scripts are executable text; editing them is safe.
         if values?.isExecutable == true { return isShebangScript ? .editor : .reveal }
         if let type, type.conforms(to: .executable) || type.conforms(to: .application) { return .reveal }
+        if line != nil { return .editor }
         // Unknown types (dynamic UTIs, bare data) have no useful viewer.
         guard let type, !type.isDynamic, type != .data,
               NSWorkspace.shared.urlForApplication(toOpen: url) != nil
