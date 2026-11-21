@@ -381,19 +381,27 @@ private struct VerticalTabRowView: View {
     }
 
     private var fittingCompact: some View {
-        ViewThatFits(in: .horizontal) {
-            if folder != nil { compactRow(pill: true, age: true, titleMin: true) }
-            compactRow(pill: false, age: true, titleMin: true)
-            compactRow(pill: false, age: false, titleMin: false)
-            if style.showIcons { compactRow(pill: false, age: false, titleMin: false, icon: false) }
+        let keep = style.metrics.titleMinWidth
+        // Room for a letter and an ellipsis before the icon goes.
+        let glimpse = style.fontSize
+        return ViewThatFits(in: .horizontal) {
+            if folder != nil { compactRow(pill: true, age: true, titleMin: keep, measured: keep) }
+            compactRow(pill: false, age: true, titleMin: keep, measured: keep)
+            compactRow(pill: false, age: false, titleMin: 0, measured: glimpse)
+            if style.showIcons { compactRow(pill: false, age: false, titleMin: 0, measured: 0, icon: false) }
         }
     }
 
-    private func compactRow(pill: Bool, age showAge: Bool, titleMin: Bool, icon: Bool = true) -> some View {
+    /// - Parameters:
+    ///   - titleMin: the title never gets less.
+    ///   - measured: the title width `ViewThatFits` checks for, so a long
+    ///     title doesn't rule out a fallback that fits it truncated.
+    private func compactRow(
+        pill: Bool, age showAge: Bool, titleMin: CGFloat, measured: CGFloat, icon: Bool = true
+    ) -> some View {
         HStack(spacing: style.metrics.itemSpacing) {
             if icon, style.showIcons { glyph }
-            // Measured at its minimum, so a long title doesn't rule out a fallback.
-            title(minWidth: titleMin ? style.metrics.titleMinWidth : 0, measuredWidth: titleMin ? style.metrics.titleMinWidth : 0)
+            title(minWidth: titleMin, measuredWidth: measured)
             Spacer(minLength: style.metrics.spacerMin)
             if row.bell { bell }
             if pill, let folder { FolderPill(folder: folder, style: style) }
