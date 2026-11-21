@@ -456,7 +456,7 @@ struct VerticalTabsModelTests {
     @Test func previousAndNextFollowSidebarOrder() {
         // Pinned [3], Recents [1, 2], Open [0, 4]; tab 2 (a Recent) is selected.
         let tabs = [tab(0), tab(1, left: 30), tab(2, selected: true, left: 20), tab(3), tab(4)]
-        let sections = VerticalTabs.sections(tabs: tabs, pins: ["s3"], recentsLimit: 3, keepInRecents: id(2))
+        let sections = VerticalTabs.sections(tabs: tabs, pins: ["s3"], recentsLimit: 3, keepInRecents: [id(2)])
         #expect(ids(sections.visual) == [id(3), id(1), id(2), id(0), id(4)])
         #expect(sections.tab(for: .next)?.id == id(0))
         #expect(sections.tab(for: .previous)?.id == id(1))
@@ -521,13 +521,29 @@ struct VerticalTabsModelTests {
         let without = VerticalTabs.sections(tabs: tabs, pins: [])
         #expect(ids(without.recents) == [id(0), id(1), id(2), id(3)])
 
-        let kept = VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: id(4))
+        let kept = VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: [id(4)])
         #expect(ids(kept.recents) == [id(0), id(1), id(2), id(4)])
         #expect(ids(kept.open) == [id(3), id(5)])
         // Already within the limit: no change; ineligible (never left): ignored.
-        #expect(VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: id(1)) == without)
-        #expect(VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: id(5)) == without)
-        #expect(VerticalTabs.sections(tabs: tabs, pins: [], recentsLimit: 0, keepInRecents: id(4)).recents.isEmpty)
+        #expect(VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: [id(1)]) == without)
+        #expect(VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: [id(5)]) == without)
+        #expect(VerticalTabs.sections(tabs: tabs, pins: [], recentsLimit: 0, keepInRecents: [id(4)]).recents.isEmpty)
+    }
+
+    @Test func walkKeepsEveryRecentItPassedThrough() {
+        // Recents [0, 1, 2, 3] are full; 4 and 5 were Recents older than all of
+        // them, kept because a quick walk selected them from Recents.
+        let tabs = [
+            tab(0, left: 100), tab(1, left: 90), tab(2, left: 80), tab(3, left: 70),
+            tab(4, left: 20), tab(5, selected: true, left: 10), tab(6),
+        ]
+        let walk = VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: [id(4), id(5)])
+        // The oldest others yield; Recents stays in recency order.
+        #expect(ids(walk.recents) == [id(0), id(1), id(4), id(5)])
+        #expect(ids(walk.open) == [id(2), id(3), id(6)])
+        // Without the walk's earlier tab, it drops back to Open: the bounce this prevents.
+        let single = VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: [id(5)])
+        #expect(ids(single.recents) == [id(0), id(1), id(2), id(5)])
     }
 
     @Test func pinnedFollowPinOrderNotTabOrder() {

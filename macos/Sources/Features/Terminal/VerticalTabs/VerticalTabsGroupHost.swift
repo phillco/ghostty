@@ -84,7 +84,9 @@ final class VerticalTabsGroupHost {
     /// The tab selected last, so the next selection can stamp when it was left.
     weak var lastSelectedWindow: TerminalWindow?
     /// The selected tab, when it was selected from Recents: it stays in Recents.
-    var keptRecent: ObjectIdentifier?
+    /// During a quick previous/next walk, every tab passed through from Recents,
+    /// so Recents holds still until the walk settles.
+    var keptRecents: Set<ObjectIdentifier> = []
     /// A tab clicked in the sidebar that AppKit hasn't selected yet. Refreshes
     /// in between keep showing it selected, so the highlight never bounces back.
     private var pendingSelection: ObjectIdentifier?
@@ -136,6 +138,11 @@ final class VerticalTabsGroupHost {
             hostingView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
         container.layoutSubtreeIfNeeded()
+    }
+
+    /// Whether `responder` is in the sidebar (a field editor sits inside its field).
+    func contains(_ responder: NSResponder?) -> Bool {
+        (responder as? NSView)?.isDescendant(of: hostingView) ?? false
     }
 
     func setSidebarWidth(_ width: CGFloat) {
@@ -204,7 +211,7 @@ final class VerticalTabsGroupHost {
         let recentsOff = settings.recentsCollapsed || !settings.showRecents
         sections = VerticalTabs.sections(
             tabs: tabs, pins: pins, recentsLimit: recentsOff ? 0 : VerticalTabs.recentsLimit,
-            keepInRecents: keptRecent)
+            keepInRecents: keptRecents)
         let hasRecents = settings.showRecents && VerticalTabs.hasRecentCandidates(tabs: tabs, pins: pins)
         if store.hasRecents != hasRecents { store.hasRecents = hasRecents }
         let now = Date()

@@ -121,13 +121,16 @@ final class VerticalTabsManager: NSObject {
         } else {
             ageTimer?.invalidate()
             ageTimer = nil
+            // The filter or rename field may have focus; the terminal gets it back.
+            // Other controls (a Find field) keep theirs.
+            let sidebarFocused = terminalWindows.filter { window in
+                hosts.values.contains { $0.contains(window.firstResponder) }
+            }
             hosts.values.forEach { $0.tearDown() }
             hosts = [:]
             trackers.values.forEach { $0.removeBackdrop() }
             trackers = [:]
-
-            // The filter or rename field may have had focus; give it back to the terminal.
-            for window in terminalWindows where !(window.firstResponder is Ghostty.SurfaceView) {
+            for window in sidebarFocused {
                 if let surface = window.terminalController?.focusedSurface {
                     window.makeFirstResponder(surface)
                 }
@@ -165,15 +168,17 @@ final class VerticalTabsManager: NSObject {
         // The tab switched away from enters Recents; the newly selected one stays
         // put. A tab passed through quickly (stepping with previous/next tab)
         // doesn't, so Recents holds still mid-walk.
+        var dwelled = true
         if let previous = host.lastSelectedWindow, previous !== window, previous.tabGroup === tabGroup {
             let previousTracker = tracker(for: previous)
-            let dwelled = previousTracker.lastEntered.map { now.timeIntervalSince($0) >= Self.recentsDwell } ?? true
+            dwelled = previousTracker.lastEntered.map { now.timeIntervalSince($0) >= Self.recentsDwell } ?? true
             if dwelled { previousTracker.lastLeft = now }
         }
         if host.lastSelectedWindow !== window { tracker(for: window).lastEntered = now }
         host.lastSelectedWindow = window
         let id = ObjectIdentifier(window)
-        host.keptRecent = host.sections.recents.contains { $0.id == id } ? id : nil
+        let kept: Set<ObjectIdentifier> = host.sections.recents.contains { $0.id == id } ? [id] : []
+        host.keptRecents = dwelled ? kept : host.keptRecents.union(kept)
         tracker(for: window).lastActive = now
         syncTabBar(of: window)
         let inset = leadingInset(for: window)

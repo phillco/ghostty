@@ -292,6 +292,11 @@ private struct VerticalTabRowView: View {
             guard store.renamingID != row.id else { return }
             store.host?.select(row.id)
         }
+        // One button per row for VoiceOver and Full Keyboard Access (List gave us this).
+        .accessibilityElement(children: store.renamingID == row.id ? .contain : .combine)
+        .accessibilityAddTraits(row.isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { store.host?.select(row.id) }
+        .accessibilityAction(named: "Close Tab") { store.host?.close(row.id) }
         .overlay(MiddleClickCatcher { store.host?.close(row.id) })
         .help(row.folder.map { "\(row.title) — \($0)" } ?? row.title)
     }
