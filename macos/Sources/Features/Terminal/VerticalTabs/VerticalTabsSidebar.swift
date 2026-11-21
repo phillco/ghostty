@@ -162,6 +162,7 @@ struct VerticalTabsSidebar: View {
             fontSize: settings.fontSize,
             secondarySize: settings.secondaryFontSize,
             pillMaxChars: settings.config.pillMaxChars,
+            pillMaxWidth: settings.width * 0.4,
             showFolders: settings.showFolders,
             showIdleTime: settings.showIdleTime,
             showShortcuts: settings.showShortcuts,
@@ -258,6 +259,8 @@ private struct VerticalTabRowStyle: Equatable {
     let fontSize: CGFloat
     let secondarySize: CGFloat
     let pillMaxChars: Int
+    /// Keeps most of the row for the title at any font size or cap.
+    let pillMaxWidth: CGFloat
     let showFolders: Bool
     let showIdleTime: Bool
     let showShortcuts: Bool
@@ -452,9 +455,6 @@ private struct FolderPill: View {
 
     var body: some View {
         let hue = VerticalTabs.hue(for: folder)
-        // A short cap keeps its full size; longer or no caps yield to the title
-        // (the row's tooltip has the full folder).
-        let fixed = (1...20).contains(style.pillMaxChars)
         Text(VerticalTabs.pillText(folder, maxChars: style.pillMaxChars))
             .font(.system(size: style.secondarySize, weight: .medium))
             .lineLimit(1)
@@ -465,8 +465,11 @@ private struct FolderPill: View {
             .background(
                 Capsule().fill(Color(hue: hue, saturation: 0.5, brightness: 0.6).opacity(0.25))
             )
-            .fixedSize(horizontal: fixed, vertical: true)
-            .layoutPriority(fixed ? 0 : -1)
+            // Full size up to `pillMaxWidth`, ahead of the title; past that it
+            // truncates (the row's tooltip has the full folder).
+            .frame(maxWidth: style.pillMaxWidth)
+            .fixedSize(horizontal: false, vertical: true)
+            .layoutPriority(1)
     }
 }
 
