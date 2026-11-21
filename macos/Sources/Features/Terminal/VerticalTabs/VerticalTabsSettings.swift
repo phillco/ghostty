@@ -10,6 +10,21 @@ final class VerticalTabsSettings: ObservableObject {
         case tall
     }
 
+    enum TextSize: String, CaseIterable {
+        case small
+        case medium
+        case large
+
+        /// Title point size; secondary text and icons scale from it.
+        var pointSize: CGFloat {
+            switch self {
+            case .small: return 11
+            case .medium: return 12
+            case .large: return 13
+            }
+        }
+    }
+
     static let defaultWidth: CGFloat = 240
     static let widthRange: ClosedRange<CGFloat> = 160...420
 
@@ -20,6 +35,11 @@ final class VerticalTabsSettings: ObservableObject {
         static let enabled = "VerticalTabsEnabled"
         static let width = "VerticalTabsWidth"
         static let density = "VerticalTabsDensity"
+        static let textSize = "VerticalTabsTextSize"
+        static let showFolders = "VerticalTabsShowFolders"
+        static let showIdleTime = "VerticalTabsShowIdleTime"
+        static let showShortcuts = "VerticalTabsShowShortcuts"
+        static let showIcons = "VerticalTabsShowIcons"
         static let recentsCollapsed = "VerticalTabsRecentsCollapsed"
         static let pins = "VerticalTabsPins"
         static let pinsSeen = "VerticalTabsPinsSeen"
@@ -37,6 +57,28 @@ final class VerticalTabsSettings: ObservableObject {
 
     @Published var density: Density {
         didSet { defaults.set(density.rawValue, forKey: Key.density) }
+    }
+
+    @Published var textSize: TextSize {
+        didSet { defaults.set(textSize.rawValue, forKey: Key.textSize) }
+    }
+
+    /// Project (folder) labels on each row.
+    @Published var showFolders: Bool {
+        didSet { defaults.set(showFolders, forKey: Key.showFolders) }
+    }
+
+    @Published var showIdleTime: Bool {
+        didSet { defaults.set(showIdleTime, forKey: Key.showIdleTime) }
+    }
+
+    @Published var showShortcuts: Bool {
+        didSet { defaults.set(showShortcuts, forKey: Key.showShortcuts) }
+    }
+
+    /// Agent / terminal glyphs at the start of each row.
+    @Published var showIcons: Bool {
+        didSet { defaults.set(showIcons, forKey: Key.showIcons) }
     }
 
     @Published var recentsCollapsed: Bool {
@@ -60,6 +102,11 @@ final class VerticalTabsSettings: ObservableObject {
         let storedWidth = defaults.double(forKey: Key.width)
         width = storedWidth > 0 ? Self.clamp(CGFloat(storedWidth)) : Self.defaultWidth
         density = defaults.string(forKey: Key.density).flatMap(Density.init(rawValue:)) ?? .compact
+        textSize = defaults.string(forKey: Key.textSize).flatMap(TextSize.init(rawValue:)) ?? .small
+        showFolders = defaults.object(forKey: Key.showFolders) as? Bool ?? true
+        showIdleTime = defaults.object(forKey: Key.showIdleTime) as? Bool ?? true
+        showShortcuts = defaults.object(forKey: Key.showShortcuts) as? Bool ?? true
+        showIcons = defaults.object(forKey: Key.showIcons) as? Bool ?? true
         recentsCollapsed = defaults.bool(forKey: Key.recentsCollapsed)
         let seen = defaults.dictionary(forKey: Key.pinsSeen) as? [String: Double] ?? [:]
 

@@ -33,19 +33,7 @@ struct VerticalTabsSidebar: View {
                 .onExitCommand { store.host?.cancelFilter() }
                 .help("Filter tabs by title or folder (⌥⌘F)")
 
-            Menu {
-                Picker("Row Height", selection: $settings.density) {
-                    Text("Compact").tag(VerticalTabsSettings.Density.compact)
-                    Text("Tall").tag(VerticalTabsSettings.Density.tall)
-                }
-                .pickerStyle(.inline)
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Row density")
+            viewOptions
 
             Button { store.host?.newTab() } label: {
                 Image(systemName: "plus")
@@ -56,6 +44,36 @@ struct VerticalTabsSidebar: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .onChange(of: store.filterFocusRequest) { _ in filterFocused = true }
+    }
+
+    private var viewOptions: some View {
+        Menu {
+            Picker("Row Height", selection: $settings.density) {
+                Text("Compact").tag(VerticalTabsSettings.Density.compact)
+                Text("Tall").tag(VerticalTabsSettings.Density.tall)
+            }
+            .pickerStyle(.inline)
+
+            Picker("Text Size", selection: $settings.textSize) {
+                Text("Small").tag(VerticalTabsSettings.TextSize.small)
+                Text("Medium").tag(VerticalTabsSettings.TextSize.medium)
+                Text("Large").tag(VerticalTabsSettings.TextSize.large)
+            }
+            .pickerStyle(.inline)
+
+            Divider()
+
+            Toggle("Project Labels", isOn: $settings.showFolders)
+            Toggle("Idle Time", isOn: $settings.showIdleTime)
+            Toggle("Shortcuts", isOn: $settings.showShortcuts)
+            Toggle("Icons", isOn: $settings.showIcons)
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("View Options")
     }
 
     // MARK: List
@@ -114,11 +132,23 @@ struct VerticalTabsSidebar: View {
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
-        .environment(\.defaultMinListRowHeight, settings.density == .tall ? 40 : 24)
+        // Tall rows grow from their second line; one without metadata stays compact.
+        .environment(\.defaultMinListRowHeight, rowStyle.minRowHeight)
+    }
+
+    private var rowStyle: VerticalTabRowStyle {
+        VerticalTabRowStyle(
+            density: settings.density,
+            fontSize: settings.textSize.pointSize,
+            showFolders: settings.showFolders,
+            showIdleTime: settings.showIdleTime,
+            showShortcuts: settings.showShortcuts,
+            showIcons: settings.showIcons)
     }
 
     private func row(_ row: VerticalTabRow) -> some View {
-        VerticalTabRowView(row: row, store: store, density: settings.density)
+        VerticalTabRowView(row: row, store: store, style: rowStyle)
+            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
             .tag(row.id)
             .contextMenu {
                 Button(row.isPinned ? "Unpin Tab" : "Pin Tab") { store.host?.togglePin(row.id) }
@@ -172,18 +202,35 @@ struct VerticalTabsSidebar: View {
 
 // MARK: - Row
 
+/// How rows draw, from the View Options menu.
+private struct VerticalTabRowStyle: Equatable {
+    let density: VerticalTabsSettings.Density
+    let fontSize: CGFloat
+    let showFolders: Bool
+    let showIdleTime: Bool
+    let showShortcuts: Bool
+    let showIcons: Bool
+
+    var secondarySize: CGFloat { fontSize - 2 }
+    var minRowHeight: CGFloat { fontSize + 9 }
+}
+
 private struct VerticalTabRowView: View {
     let row: VerticalTabRow
     @ObservedObject var store: VerticalTabsStore
-    let density: VerticalTabsSettings.Density
+    let style: VerticalTabRowStyle
 
     @State private var hovering = false
     @State private var renameText = ""
     @FocusState private var renameFocused: Bool
 
+    private var folder: String? { style.showFolders ? row.folder : nil }
+    private var age: String? { style.showIdleTime ? row.age : nil }
+    private var shortcutNumber: Int? { style.showShortcuts ? row.shortcut : nil }
+
     var body: some View {
         Group {
-            switch density {
+            switch style.density {
             case .compact: compact
             case .tall: tall
             }
@@ -195,30 +242,30 @@ private struct VerticalTabRowView: View {
     }
 
     private var compact: some View {
-        HStack(spacing: 6) {
-            glyph
+        HStack(spacing: 4) {
+            if style.showIcons { glyph }
             title
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
             if row.bell { bell }
-            if let folder = row.folder { FolderPill(folder: folder) }
+            if let folder { FolderPill(folder: folder, fontSize: style.secondarySize) }
             trailing
         }
     }
 
     private var tall: some View {
-        HStack(alignment: .center, spacing: 6) {
-            glyph
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .center, spacing: 4) {
+            if style.showIcons { glyph }
+            VStack(alignment: .leading, spacing: 2) {
                 title
-                HStack(spacing: 5) {
-                    if let folder = row.folder { FolderPill(folder: folder) }
-                    if row.bell { bell }
-                    if let age = row.age {
-                        Text(age).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                if folder != nil || row.bell || age != nil {
+                    HStack(spacing: 4) {
+                        if let folder { FolderPill(folder: folder, fontSize: style.secondarySize) }
+                        if row.bell { bell }
+                        if let age { ageText(age) }
                     }
                 }
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
             closeOrShortcut
         }
         .padding(.vertical, 2)
@@ -229,6 +276,7 @@ private struct VerticalTabRowView: View {
         if store.renamingID == row.id {
             TextField("Tab title", text: $renameText)
                 .textFieldStyle(.plain)
+                .font(.system(size: style.fontSize))
                 .focused($renameFocused)
                 .onAppear {
                     renameText = store.host?.renameText(for: row.id) ?? row.title
@@ -241,9 +289,9 @@ private struct VerticalTabRowView: View {
                 }
         } else {
             Text(row.title)
+                .font(.system(size: style.fontSize, weight: row.isSelected ? .semibold : .regular))
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .fontWeight(row.isSelected ? .semibold : .regular)
         }
     }
 
@@ -261,14 +309,22 @@ private struct VerticalTabRowView: View {
             case .terminal: Image(systemName: "terminal").foregroundStyle(.secondary)
             }
         }
-        .font(.system(size: 11))
-        .frame(width: 14)
+        .font(.system(size: style.secondarySize))
+        .frame(width: style.fontSize + 1)
     }
 
     private var bell: some View {
         Image(systemName: "bell.fill")
-            .font(.system(size: 9))
+            .font(.system(size: style.secondarySize - 1))
             .foregroundStyle(.orange)
+    }
+
+    private func ageText(_ age: String) -> some View {
+        Text(age)
+            .font(.system(size: style.secondarySize))
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .fixedSize()
     }
 
     @ViewBuilder
@@ -276,9 +332,7 @@ private struct VerticalTabRowView: View {
         if hovering {
             closeButton
         } else {
-            if let age = row.age {
-                Text(age).font(.caption2).foregroundStyle(.secondary).monospacedDigit()
-            }
+            if let age { ageText(age) }
             shortcut
         }
     }
@@ -290,17 +344,20 @@ private struct VerticalTabRowView: View {
 
     @ViewBuilder
     private var shortcut: some View {
-        if let n = row.shortcut {
-            Text("⌘\(n)").font(.caption2).foregroundStyle(.tertiary)
-                .frame(minWidth: 20, alignment: .trailing)
+        if let n = shortcutNumber {
+            Text("⌘\(n)")
+                .font(.system(size: style.secondarySize))
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+                .fixedSize()
         }
     }
 
     private var closeButton: some View {
         Button { store.host?.close(row.id) } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .semibold))
-                .frame(width: 20, height: 16)
+                .font(.system(size: style.secondarySize - 1, weight: .semibold))
+                .frame(width: 16, height: 14)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
@@ -311,14 +368,15 @@ private struct VerticalTabRowView: View {
 /// A short folder name on a subtle, deterministic tint.
 private struct FolderPill: View {
     let folder: String
+    let fontSize: CGFloat
 
     var body: some View {
         let hue = VerticalTabs.hue(for: folder)
-        Text(folder)
-            .font(.system(size: 10, weight: .medium))
+        Text(VerticalTabs.pillText(folder))
+            .font(.system(size: fontSize, weight: .medium))
             .lineLimit(1)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 0.5)
             .foregroundStyle(Color(hue: hue, saturation: 0.35, brightness: 0.95))
             .background(
                 Capsule().fill(Color(hue: hue, saturation: 0.5, brightness: 0.6).opacity(0.25))

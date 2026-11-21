@@ -41,11 +41,76 @@ struct VerticalTabsModelTests {
         ("vim README.md", "vim README.md", .terminal),
         ("  ✳  spaced  ", "spaced", .claude),
         ("a ✳ in the middle", "a ✳ in the middle", .terminal),
+        ("✧ Text Read", "Text Read", .agy),
+        ("◐ Clarc-observer", "Clarc-observer", .agy),
+        ("◥ tri frame", "tri frame", .agy),
+        ("◉ halo idle", "halo idle", .agy),
+        ("⠂ Busy Claude", "Busy Claude", .claude),
+        ("⠐⠂ Busy Claude", "Busy Claude", .claude),
+        ("🔔 ⠋ Busy Claude", "Busy Claude", .claude),
+        ("⠋ 🔔 ✧ Busy agy", "Busy agy", .agy),
+        ("🔔 ◐ Needs input", "Needs input", .agy),
     ])
     func parsesTitles(raw: String, text: String, platform: VerticalTabs.Platform) {
         let parsed = VerticalTabs.parseTitle(raw)
         #expect(parsed.text == text)
         #expect(parsed.platform == platform)
+    }
+
+    @Test func everyAgyGlyphIsAgy() {
+        for glyph in VerticalTabs.agyGlyphs {
+            #expect(VerticalTabs.parseTitle("\(glyph) t") == .init(text: "t", platform: .agy))
+        }
+        #expect(VerticalTabs.agyGlyphs.count == 26)
+    }
+
+    @Test func pillText() {
+        #expect(VerticalTabs.pillText("ghostty") == "ghostty")
+        #expect(VerticalTabs.pillText("Clarc-observer") == "Clarc-obser…")
+        #expect(VerticalTabs.pillText("Clarc-observer").count == 12)
+    }
+
+    // MARK: Settings
+
+    /// Runs `body` against an empty defaults suite, removed afterward.
+    private func withFreshDefaults(_ body: (UserDefaults) -> Void) {
+        let name = "VerticalTabsModelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        body(defaults)
+    }
+
+    @Test func settingsDefaults() {
+        withFreshDefaults { defaults in
+            let settings = VerticalTabsSettings(defaults: defaults)
+            #expect(settings.density == .compact)
+            #expect(settings.textSize == .small)
+            #expect(settings.textSize.pointSize == 11)
+            #expect(settings.showFolders)
+            #expect(settings.showIdleTime)
+            #expect(settings.showShortcuts)
+            #expect(settings.showIcons)
+        }
+    }
+
+    @Test func settingsPersist() {
+        withFreshDefaults { defaults in
+            let settings = VerticalTabsSettings(defaults: defaults)
+            settings.textSize = .large
+            settings.density = .tall
+            settings.showFolders = false
+            settings.showIdleTime = false
+            settings.showShortcuts = false
+            settings.showIcons = false
+
+            let reloaded = VerticalTabsSettings(defaults: defaults)
+            #expect(reloaded.textSize == .large)
+            #expect(reloaded.density == .tall)
+            #expect(!reloaded.showFolders)
+            #expect(!reloaded.showIdleTime)
+            #expect(!reloaded.showShortcuts)
+            #expect(!reloaded.showIcons)
+        }
     }
 
     @Test func folderNames() {
