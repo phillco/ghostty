@@ -156,8 +156,10 @@ struct VerticalTabsSidebar: View {
             if let move {
                 view
                     .onDrag {
+                        let payload = VerticalTabsDrop.marker + UUID().uuidString
                         store.draggingID = row.id
-                        return NSItemProvider(object: VerticalTabsDrop.marker as NSString)
+                        store.dragPayload = payload
+                        return NSItemProvider(object: payload as NSString)
                     }
                     .onDrop(of: [.text], delegate: VerticalTabsDrop(
                         target: row.id, section: rows.map(\.id), store: store, move: move))
@@ -468,9 +470,10 @@ private struct MiddleClickCatcher: NSViewRepresentable {
 }
 
 /// Drag-to-reorder within one section. The dragged row's ID lives in the
-/// store; the pasteboard only carries a marker.
+/// store; the pasteboard carries a per-drag token, so a cancelled drag's
+/// stale ID can't turn a later text drop into a reorder.
 private struct VerticalTabsDrop: DropDelegate {
-    static let marker = "ghostty-vertical-tab"
+    static let marker = "ghostty-vertical-tab:"
 
     let target: ObjectIdentifier
     /// The section's row IDs, in order.
@@ -502,11 +505,20 @@ private struct VerticalTabsDrop: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         let offsets = offsets
+        let expected = store.dragPayload
         store.dropTarget = nil
         store.draggingID = nil
-        guard let offsets, offsets.from != offsets.to else { return false }
-        // `onMove` semantics: insert before the destination offset.
-        move(IndexSet(integer: offsets.from), offsets.from < offsets.to ? offsets.to + 1 : offsets.to)
+        store.dragPayload = nil
+        guard let offsets, offsets.from != offsets.to, let expected,
+              let provider = info.itemProviders(for: [.text]).first else { return false }
+        let move = move
+        _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard (object as? NSString) as String? == expected else { return }
+            DispatchQueue.main.async {
+                // `onMove` semantics: insert before the destination offset.
+                move(IndexSet(integer: offsets.from), offsets.from < offsets.to ? offsets.to + 1 : offsets.to)
+            }
+        }
         return true
     }
 }

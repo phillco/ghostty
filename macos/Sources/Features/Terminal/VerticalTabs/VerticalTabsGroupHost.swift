@@ -25,8 +25,10 @@ final class VerticalTabsStore: ObservableObject {
     @Published var renamingID: ObjectIdentifier?
     /// Bumped to move keyboard focus into the filter field.
     @Published var filterFocusRequest: Int = 0
-    /// The row being dragged to reorder, and where it would land.
+    /// The row being dragged to reorder, and where it would land. A cancelled
+    /// drag leaves them set; `dragPayload` proves a drop is that drag.
     var draggingID: ObjectIdentifier?
+    var dragPayload: String?
     @Published var dropTarget: DropTarget?
 
     struct DropTarget: Equatable {
