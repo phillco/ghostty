@@ -47,53 +47,59 @@ final class VerticalTabsSettings: ObservableObject {
     }
 
     private let defaults: UserDefaults
+    /// Set while values are read from defaults, so `didSet` doesn't write them back.
+    private var isLoading = false
+
+    private func save(_ value: Any, _ key: String) {
+        if !isLoading { defaults.set(value, forKey: key) }
+    }
 
     @Published var enabled: Bool {
-        didSet { defaults.set(enabled, forKey: Key.enabled) }
+        didSet { save(enabled, Key.enabled) }
     }
 
     @Published var width: CGFloat {
-        didSet { defaults.set(Double(width), forKey: Key.width) }
+        didSet { save(Double(width), Key.width) }
     }
 
     @Published var density: Density {
-        didSet { defaults.set(density.rawValue, forKey: Key.density) }
+        didSet { save(density.rawValue, Key.density) }
     }
 
     @Published var textSize: TextSize {
-        didSet { defaults.set(textSize.rawValue, forKey: Key.textSize) }
+        didSet { save(textSize.rawValue, Key.textSize) }
     }
 
     /// Project (folder) labels on each row.
     @Published var showFolders: Bool {
-        didSet { defaults.set(showFolders, forKey: Key.showFolders) }
+        didSet { save(showFolders, Key.showFolders) }
     }
 
     @Published var showIdleTime: Bool {
-        didSet { defaults.set(showIdleTime, forKey: Key.showIdleTime) }
+        didSet { save(showIdleTime, Key.showIdleTime) }
     }
 
     @Published var showShortcuts: Bool {
-        didSet { defaults.set(showShortcuts, forKey: Key.showShortcuts) }
+        didSet { save(showShortcuts, Key.showShortcuts) }
     }
 
     /// Agent / terminal glyphs at the start of each row.
     @Published var showIcons: Bool {
-        didSet { defaults.set(showIcons, forKey: Key.showIcons) }
+        didSet { save(showIcons, Key.showIcons) }
     }
 
     /// The Recents section; when off its tabs stay in Open.
     @Published var showRecents: Bool {
-        didSet { defaults.set(showRecents, forKey: Key.showRecents) }
+        didSet { save(showRecents, Key.showRecents) }
     }
 
     @Published var recentsCollapsed: Bool {
-        didSet { defaults.set(recentsCollapsed, forKey: Key.recentsCollapsed) }
+        didSet { save(recentsCollapsed, Key.recentsCollapsed) }
     }
 
     @Published var pins: VerticalTabs.Pins {
         didSet {
-            guard pins != oldValue else { return }
+            guard !isLoading, pins != oldValue else { return }
             defaults.set(pins.keys, forKey: Key.pins)
             markSeen(pins.keys.filter { !oldValue.keys.contains($0) })
         }
@@ -104,26 +110,85 @@ final class VerticalTabsSettings: ObservableObject {
 
     init(defaults: UserDefaults = .ghostty) {
         self.defaults = defaults
-        enabled = defaults.bool(forKey: Key.enabled)
-        let storedWidth = defaults.double(forKey: Key.width)
-        width = storedWidth > 0 ? Self.clamp(CGFloat(storedWidth)) : Self.defaultWidth
-        density = defaults.string(forKey: Key.density).flatMap(Density.init(rawValue:)) ?? .compact
-        textSize = defaults.string(forKey: Key.textSize).flatMap(TextSize.init(rawValue:)) ?? .small
-        showFolders = defaults.object(forKey: Key.showFolders) as? Bool ?? true
-        showIdleTime = defaults.object(forKey: Key.showIdleTime) as? Bool ?? true
-        showShortcuts = defaults.object(forKey: Key.showShortcuts) as? Bool ?? true
-        showIcons = defaults.object(forKey: Key.showIcons) as? Bool ?? true
-        showRecents = defaults.object(forKey: Key.showRecents) as? Bool ?? true
-        recentsCollapsed = defaults.bool(forKey: Key.recentsCollapsed)
-        let seen = defaults.dictionary(forKey: Key.pinsSeen) as? [String: Double] ?? [:]
+        let stored = Stored(defaults: defaults)
+        enabled = stored.enabled
+        width = stored.width
+        density = stored.density
+        textSize = stored.textSize
+        showFolders = stored.showFolders
+        showIdleTime = stored.showIdleTime
+        showShortcuts = stored.showShortcuts
+        showIcons = stored.showIcons
+        showRecents = stored.showRecents
+        recentsCollapsed = stored.recentsCollapsed
+        pins = stored.pins
+        pinsSeen = stored.pinsSeen
+        stored.pruneExpiredPins(in: defaults)
+    }
 
-        // Drop pins whose tab has been gone for a long time (closed tabs never come back).
-        let now = Date().timeIntervalSince1970
-        let keys = defaults.stringArray(forKey: Key.pins) ?? []
-        let live = keys.filter { now - (seen[$0] ?? now) < Self.pinExpiry }
-        pins = .init(keys: live)
-        pinsSeen = seen.filter { live.contains($0.key) }
-        if live != keys { defaults.set(live, forKey: Key.pins) }
+    /// Re-reads every preference another process (`ghostty-test-mirror`) may
+    /// have written while we run. Publishes only values that changed.
+    func reloadFromDefaults() {
+        let stored = Stored(defaults: defaults)
+        isLoading = true
+        defer { isLoading = false }
+        if enabled != stored.enabled { enabled = stored.enabled }
+        if width != stored.width { width = stored.width }
+        if density != stored.density { density = stored.density }
+        if textSize != stored.textSize { textSize = stored.textSize }
+        if showFolders != stored.showFolders { showFolders = stored.showFolders }
+        if showIdleTime != stored.showIdleTime { showIdleTime = stored.showIdleTime }
+        if showShortcuts != stored.showShortcuts { showShortcuts = stored.showShortcuts }
+        if showIcons != stored.showIcons { showIcons = stored.showIcons }
+        if showRecents != stored.showRecents { showRecents = stored.showRecents }
+        if recentsCollapsed != stored.recentsCollapsed { recentsCollapsed = stored.recentsCollapsed }
+        if pins != stored.pins { pins = stored.pins }
+        pinsSeen = stored.pinsSeen
+        stored.pruneExpiredPins(in: defaults)
+    }
+
+    /// Every preference as stored, with defaults applied and expired pins dropped.
+    private struct Stored {
+        let enabled: Bool
+        let width: CGFloat
+        let density: Density
+        let textSize: TextSize
+        let showFolders: Bool
+        let showIdleTime: Bool
+        let showShortcuts: Bool
+        let showIcons: Bool
+        let showRecents: Bool
+        let recentsCollapsed: Bool
+        let pins: VerticalTabs.Pins
+        let pinsSeen: [String: Double]
+        /// Stored pin keys, before expiry.
+        private let storedPins: [String]
+
+        init(defaults: UserDefaults) {
+            enabled = defaults.bool(forKey: Key.enabled)
+            let storedWidth = defaults.double(forKey: Key.width)
+            width = storedWidth > 0 ? VerticalTabsSettings.clamp(CGFloat(storedWidth)) : VerticalTabsSettings.defaultWidth
+            density = defaults.string(forKey: Key.density).flatMap(Density.init(rawValue:)) ?? .compact
+            textSize = defaults.string(forKey: Key.textSize).flatMap(TextSize.init(rawValue:)) ?? .small
+            showFolders = defaults.object(forKey: Key.showFolders) as? Bool ?? true
+            showIdleTime = defaults.object(forKey: Key.showIdleTime) as? Bool ?? true
+            showShortcuts = defaults.object(forKey: Key.showShortcuts) as? Bool ?? true
+            showIcons = defaults.object(forKey: Key.showIcons) as? Bool ?? true
+            showRecents = defaults.object(forKey: Key.showRecents) as? Bool ?? true
+            recentsCollapsed = defaults.bool(forKey: Key.recentsCollapsed)
+            let seen = defaults.dictionary(forKey: Key.pinsSeen) as? [String: Double] ?? [:]
+
+            // Drop pins whose tab has been gone for a long time (closed tabs never come back).
+            let now = Date().timeIntervalSince1970
+            storedPins = defaults.stringArray(forKey: Key.pins) ?? []
+            let live = storedPins.filter { now - (seen[$0] ?? now) < VerticalTabsSettings.pinExpiry }
+            pins = .init(keys: live)
+            pinsSeen = seen.filter { live.contains($0.key) }
+        }
+
+        func pruneExpiredPins(in defaults: UserDefaults) {
+            if pins.keys != storedPins { defaults.set(pins.keys, forKey: Key.pins) }
+        }
     }
 
     static func clamp(_ width: CGFloat) -> CGFloat {

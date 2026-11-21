@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import Testing
 @testable import Ghostty
@@ -297,6 +298,45 @@ struct VerticalTabsModelTests {
             #expect(!reloaded.showShortcuts)
             #expect(!reloaded.showIcons)
             #expect(!reloaded.showRecents)
+        }
+    }
+
+    @Test func settingsReloadFromDefaults() {
+        withFreshDefaults { defaults in
+            let settings = VerticalTabsSettings(defaults: defaults)
+            var published = 0
+            let cancellable = settings.objectWillChange.sink { published += 1 }
+            defer { cancellable.cancel() }
+
+            // Nothing changed: nothing published.
+            settings.reloadFromDefaults()
+            #expect(published == 0)
+
+            // Another process (ghostty-test-mirror) writes our prefs.
+            defaults.set(true, forKey: "VerticalTabsEnabled")
+            defaults.set(300.0, forKey: "VerticalTabsWidth")
+            defaults.set("tall", forKey: "VerticalTabsDensity")
+            defaults.set("large", forKey: "VerticalTabsTextSize")
+            defaults.set(false, forKey: "VerticalTabsShowFolders")
+            defaults.set(false, forKey: "VerticalTabsShowRecents")
+            defaults.set(true, forKey: "VerticalTabsRecentsCollapsed")
+            defaults.set(["pin-a", "pin-b"], forKey: "VerticalTabsPins")
+            settings.reloadFromDefaults()
+            #expect(settings.enabled)
+            #expect(settings.width == 300)
+            #expect(settings.density == .tall)
+            #expect(settings.textSize == .large)
+            #expect(!settings.showFolders)
+            #expect(settings.showIdleTime)
+            #expect(!settings.showRecents)
+            #expect(settings.recentsCollapsed)
+            #expect(settings.pins.keys == ["pin-a", "pin-b"])
+
+            // Reloading doesn't write back (or mark the new pins seen).
+            #expect(defaults.dictionary(forKey: "VerticalTabsPinsSeen") == nil)
+            // Later edits still persist.
+            settings.width = 200
+            #expect(defaults.double(forKey: "VerticalTabsWidth") == 200)
         }
     }
 
