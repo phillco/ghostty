@@ -252,6 +252,18 @@ class TerminalWindow: NSWindow {
         }
     }
 
+    // Window > Show Previous/Next Tab follow the vertical sidebar's rows, like
+    // previous_tab/next_tab.
+    override func selectPreviousTab(_ sender: Any?) {
+        if let tabGroup, VerticalTabsManager.shared.select(.previous, in: tabGroup) { return }
+        super.selectPreviousTab(sender)
+    }
+
+    override func selectNextTab(_ sender: Any?) {
+        if let tabGroup, VerticalTabsManager.shared.select(.next, in: tabGroup) { return }
+        super.selectNextTab(sender)
+    }
+
     override func addTitlebarAccessoryViewController(_ childViewController: NSTitlebarAccessoryViewController) {
         super.addTitlebarAccessoryViewController(childViewController)
 
