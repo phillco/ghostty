@@ -452,7 +452,9 @@ private struct FolderPill: View {
 
     var body: some View {
         let hue = VerticalTabs.hue(for: folder)
-        let capped = style.pillMaxChars > 0
+        // A short cap keeps its full size; longer or no caps yield to the title
+        // (the row's tooltip has the full folder).
+        let fixed = (1...20).contains(style.pillMaxChars)
         Text(VerticalTabs.pillText(folder, maxChars: style.pillMaxChars))
             .font(.system(size: style.secondarySize, weight: .medium))
             .lineLimit(1)
@@ -463,10 +465,8 @@ private struct FolderPill: View {
             .background(
                 Capsule().fill(Color(hue: hue, saturation: 0.5, brightness: 0.6).opacity(0.25))
             )
-            // A capped pill keeps its size; an uncapped one yields to the title
-            // (the row's tooltip has the full folder).
-            .fixedSize(horizontal: capped, vertical: true)
-            .layoutPriority(capped ? 0 : -1)
+            .fixedSize(horizontal: fixed, vertical: true)
+            .layoutPriority(fixed ? 0 : -1)
     }
 }
 
