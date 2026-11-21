@@ -18,6 +18,7 @@ final class VerticalTabsManager: NSObject {
     private var trackers: [ObjectIdentifier: WindowTracker] = [:]
     private var observers: [NSObjectProtocol] = []
     private var ageTimer: Timer?
+    private var recentsCollapsedCancellable: AnyCancellable?
     private var started = false
 
     var isEnabled: Bool { settings.enabled }
@@ -55,6 +56,12 @@ final class VerticalTabsManager: NSObject {
         ) { [weak self] _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(250)) { self?.refreshAll() }
         })
+
+        // Collapsing Recents moves its tabs back into Open (and renumbers them).
+        recentsCollapsedCancellable = settings.$recentsCollapsed
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.refreshAll() } }
 
         if isEnabled { applyEnabled() }
     }

@@ -8,6 +8,7 @@ struct VerticalTabsSidebar: View {
     @ObservedObject var settings: VerticalTabsSettings
     @FocusState private var filterFocused: Bool
     @State private var dragStartWidth: CGFloat?
+    @State private var hoveringDivider = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -84,7 +85,7 @@ struct VerticalTabsSidebar: View {
                     }
                 }
 
-                if !store.recents.isEmpty {
+                if store.hasRecents {
                     Section {
                         if !settings.recentsCollapsed {
                             ForEach(store.recents) { row($0) }
@@ -139,7 +140,15 @@ struct VerticalTabsSidebar: View {
                 .frame(width: 6)
                 .contentShape(Rectangle())
                 .onHover { inside in
+                    guard inside != hoveringDivider else { return }
+                    hoveringDivider = inside
                     if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                }
+                .onDisappear {
+                    if hoveringDivider {
+                        hoveringDivider = false
+                        NSCursor.pop()
+                    }
                 }
                 .gesture(
                     DragGesture(minimumDistance: 1, coordinateSpace: .global)
@@ -337,7 +346,9 @@ private struct MiddleClickCatcher: NSViewRepresentable {
         var action: (() -> Void)?
 
         override func hitTest(_ point: NSPoint) -> NSView? {
-            switch NSApp.currentEvent?.type {
+            // Only the middle button; extra buttons (3, 4: back/forward) pass through.
+            guard let event = NSApp.currentEvent, event.buttonNumber == 2 else { return nil }
+            switch event.type {
             case .otherMouseDown, .otherMouseUp: return super.hitTest(point)
             default: return nil
             }

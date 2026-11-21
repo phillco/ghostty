@@ -145,6 +145,22 @@ struct VerticalTabsModelTests {
         #expect(Set(all).count == tabs.count)
     }
 
+    @Test func collapsedRecentsKeepTabsInOpen() {
+        let tabs = [
+            tab(0, focused: 10),
+            tab(1, selected: true, focused: 20),
+            tab(2, focused: 30),
+            tab(3),
+        ]
+        let collapsed = VerticalTabs.sections(tabs: tabs, pins: ["s3"], recentsLimit: 0)
+        #expect(collapsed.recents.isEmpty)
+        #expect(ids(collapsed.open) == [id(0), id(1), id(2)])
+        #expect(ids(collapsed.numbered) == [id(3), id(0), id(1), id(2)])
+        // The collapsed header stays available because there are recent tabs.
+        #expect(VerticalTabs.hasRecentCandidates(tabs: tabs, pins: ["s3"]))
+        #expect(!VerticalTabs.hasRecentCandidates(tabs: [tab(0, selected: true, focused: 5)], pins: []))
+    }
+
     @Test func pinnedFollowPinOrderNotTabOrder() {
         let tabs = (0..<3).map { tab($0) }
         let sections = VerticalTabs.sections(tabs: tabs, pins: ["s2", "s0"])

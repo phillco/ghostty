@@ -20,6 +20,8 @@ final class VerticalTabsStore: ObservableObject {
     @Published var recents: [VerticalTabRow] = []
     @Published var open: [VerticalTabRow] = []
     @Published var filter: String = ""
+    /// Show the Recents header (possibly collapsed) even when it has no rows.
+    @Published var hasRecents: Bool = false
     @Published var renamingID: ObjectIdentifier?
     /// Bumped to move keyboard focus into the filter field.
     @Published var filterFocusRequest: Int = 0
@@ -143,7 +145,12 @@ final class VerticalTabsGroupHost {
         updatePinKeys()
 
         let pins = manager.settings.pins.keys
-        sections = VerticalTabs.sections(tabs: tabs, pins: pins)
+        // Collapsed Recents must not hide tabs: they stay in Open instead.
+        let collapsed = manager.settings.recentsCollapsed
+        sections = VerticalTabs.sections(
+            tabs: tabs, pins: pins, recentsLimit: collapsed ? 0 : VerticalTabs.recentsLimit)
+        let hasRecents = VerticalTabs.hasRecentCandidates(tabs: tabs, pins: pins)
+        if store.hasRecents != hasRecents { store.hasRecents = hasRecents }
         let now = Date()
         func rows(_ list: [VerticalTabs.Tab], pinned: Bool) -> [VerticalTabRow] {
             list.map { tab in
@@ -205,9 +212,14 @@ final class VerticalTabsGroupHost {
 
     func select(_ id: ObjectIdentifier) {
         guard let window = windowsByID[id] else { return }
-        // Switch after the current SwiftUI event so the sidebar isn't reparented mid-event.
+        if !store.filter.isEmpty { store.filter = "" }
+        // Switch after the current SwiftUI event so the sidebar isn't reparented
+        // mid-event, then hand keyboard focus to the terminal.
         DispatchQueue.main.async {
             window.makeKeyAndOrderFront(nil)
+            if let surface = window.terminalController?.focusedSurface {
+                window.makeFirstResponder(surface)
+            }
         }
     }
 

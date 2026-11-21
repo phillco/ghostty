@@ -183,6 +183,13 @@ enum VerticalTabs {
         return result
     }
 
+    /// Whether any tab could appear in Recents. With Recents collapsed, `sections`
+    /// is called with `recentsLimit: 0` so those tabs stay visible in Open, and
+    /// this keeps the collapsed header available for re-expanding.
+    static func hasRecentCandidates(tabs: [Tab], pins: [String]) -> Bool {
+        !sections(tabs: tabs, pins: pins, recentsLimit: 1).recents.isEmpty
+    }
+
     /// The tab group order that matches the sidebar: Pinned first, then every
     /// other tab in its existing relative order.
     static func groupOrder(tabs: [Tab], pins: [String]) -> [ObjectIdentifier] {
