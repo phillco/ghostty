@@ -37,7 +37,7 @@ fn getValue(ptr_raw: *anyopaque, value: anytype) bool {
             ptr.* = value;
         },
 
-        u8, u32 => {
+        u8, u16, u32 => {
             const ptr: *c_uint = @ptrCast(@alignCast(ptr_raw));
             ptr.* = @intCast(value);
         },
@@ -129,6 +129,28 @@ test "c_get: u8" {
     var cval: f32 = undefined;
     try testing.expect(get(&c, .@"font-size", &cval));
     try testing.expectEqual(@as(f32, 24), cval);
+}
+
+test "c_get: vertical tabs" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+
+    var c = try Config.default(alloc);
+    defer c.deinit();
+    c.@"vertical-tabs-font-size" = 14.5;
+    c.@"vertical-tabs-recents-limit" = 7;
+
+    var size: f64 = undefined;
+    try testing.expect(get(&c, .@"vertical-tabs-font-size", &size));
+    try testing.expectEqual(@as(f64, 14.5), size);
+
+    var limit: c_uint = undefined;
+    try testing.expect(get(&c, .@"vertical-tabs-recents-limit", &limit));
+    try testing.expectEqual(@as(c_uint, 7), limit);
+
+    var chars: c_uint = undefined;
+    try testing.expect(get(&c, .@"vertical-tabs-pill-max-chars", &chars));
+    try testing.expectEqual(@as(c_uint, 12), chars);
 }
 
 test "c_get: enum" {

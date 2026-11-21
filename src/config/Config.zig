@@ -3461,6 +3461,30 @@ keybind: Keybinds = .{},
 /// Available since: 1.2.0
 @"macos-window-buttons": MacWindowButtons = .visible,
 
+/// macOS only. Title font size, in points, of the vertical tabs sidebar.
+/// `0` (the default) uses the size chosen in the sidebar's View Options menu.
+/// Other values are clamped to 8–32. Changes apply on config reload.
+@"vertical-tabs-font-size": f64 = 0,
+
+/// macOS only. Font size, in points, of the vertical tabs sidebar's secondary
+/// text: folder pills, idle times, shortcuts and icons. `0` (the default)
+/// derives it from the title size (two points smaller, at least 9). Other
+/// values are clamped to 7–28. Changes apply on config reload.
+@"vertical-tabs-secondary-font-size": f64 = 0,
+
+/// macOS only. The most tabs the vertical tabs sidebar shows in Recents, up
+/// to 20. `0` hides Recents. Changes apply on config reload.
+@"vertical-tabs-recents-limit": u16 = 4,
+
+/// macOS only. Seconds a tab must stay selected before leaving it adds it to
+/// the vertical tabs sidebar's Recents, so walking past tabs doesn't reshuffle
+/// Recents. Clamped to 0–30. Changes apply on config reload.
+@"vertical-tabs-recents-dwell": f64 = 1.0,
+
+/// macOS only. The most characters a vertical tabs folder pill shows before
+/// truncating with `…`. `0` never truncates. Changes apply on config reload.
+@"vertical-tabs-pill-max-chars": u16 = 12,
+
 /// The style of the macOS titlebar. Available values are: "native",
 /// "transparent", "tabs", and "hidden".
 ///
