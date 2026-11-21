@@ -823,6 +823,11 @@ extension Ghostty {
         ) -> Bool {
             let action = Ghostty.Action.OpenURL(c: v)
 
+            // Agent peer badges: focus the linked terminal without going through Launch Services.
+            if MainActor.assumeIsolated({ FocusLink.handle(action.url) }) {
+                return true
+            }
+
             // Local paths from terminal output open without prompting: text
             // and unknown types in the link editor, other files in their
             // default app, and executables are only revealed in Finder.
