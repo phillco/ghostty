@@ -8,7 +8,7 @@ enum VerticalTabs {
 
     /// Which agent produced a title, detected from its leading glyph.
     enum Platform: Equatable {
-        case agy      // ✦
+        case agy      // ✦ and the other `ag` title glyphs
         case claude   // ✳
         case terminal
     }
@@ -19,18 +19,29 @@ enum VerticalTabs {
         let platform: Platform
     }
 
+    /// Leading glyphs `ag` puts in titles: every preset's idle glyph and spinner
+    /// frames (`~/bin/go/ag/config.go` `titlePresets`).
+    static let agyGlyphs: Set<Unicode.Scalar> = [
+        "✦", "✧", "◜", "◝", "◞", "◟", "◠", "◡", "◐", "◓", "◑", "◒",
+        "◴", "◷", "◶", "◵", "◉", "◌", "◎", "◈", "◇", "◆", "◢", "◣", "◤", "◥",
+    ]
+
     /// Strips leading whitespace, Braille spinner characters (U+2800–U+28FF),
-    /// Ghostty's bell prefix and a leading `✦`/`✳` glyph from a tab title.
+    /// Ghostty's bell prefix and a leading agent glyph from a tab title.
+    /// Claude Code shows `✳` when idle and only a Braille spinner while busy, so
+    /// a non-blank Braille prefix without an `ag` glyph also means Claude.
     static func parseTitle(_ raw: String) -> ParsedTitle {
         var scalars = Substring(raw).unicodeScalars[...]
         var platform: Platform = .terminal
+        var sawSpinner = false
 
         func dropNoise() {
             while let first = scalars.first {
-                if first.properties.isWhitespace || (0x2800...0x28FF).contains(first.value) ||
-                    first == "\u{FE0F}" {
+                if (0x2801...0x28FF).contains(first.value) {
+                    sawSpinner = true
                     scalars.removeFirst()
-                } else if first == "🔔" {
+                } else if first.properties.isWhitespace || first == "\u{2800}" ||
+                    first == "\u{FE0F}" || first == "🔔" {
                     scalars.removeFirst()
                 } else {
                     break
@@ -40,7 +51,7 @@ enum VerticalTabs {
 
         dropNoise()
         if let first = scalars.first {
-            if first == "✦" {
+            if agyGlyphs.contains(first) {
                 platform = .agy
                 scalars.removeFirst()
             } else if first == "✳" {
@@ -49,10 +60,16 @@ enum VerticalTabs {
             }
         }
         dropNoise()
+        if platform == .terminal, sawSpinner { platform = .claude }
 
         let text = String(String.UnicodeScalarView(scalars))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return .init(text: text, platform: platform)
+    }
+
+    /// A folder name shortened for its pill, so long repo names don't starve the title.
+    static func pillText(_ folder: String, maxLength: Int = 12) -> String {
+        folder.count <= maxLength ? folder : String(folder.prefix(maxLength - 1)) + "…"
     }
 
     /// The short folder name shown in a row's pill: the last path component,
