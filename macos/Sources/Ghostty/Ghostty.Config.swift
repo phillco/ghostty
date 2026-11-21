@@ -350,6 +350,16 @@ extension Ghostty {
             return value.isEmpty ? nil : value
         }
 
+        /// link-trusted-schemes, lowercased.
+        var linkTrustedSchemes: Set<String> {
+            guard let config = self.config else { return [] }
+            var v: UnsafePointer<Int8>?
+            let key = "link-trusted-schemes"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))), let ptr = v else { return [] }
+            let words = String(cString: ptr).lowercased().split(whereSeparator: { $0 == "," || $0.isWhitespace })
+            return Set(words.map(String.init))
+        }
+
         var linkConfirmCustomSchemes: Bool {
             guard let config = self.config else { return true }
             var v = true

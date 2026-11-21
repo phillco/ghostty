@@ -4,7 +4,10 @@ import AppKit
 enum UntrustedURLAlert {
     static func presentConfirmation(for url: URL, displayString: String) {
         // link-confirm-custom-schemes = false opens custom schemes directly.
-        if (NSApp.delegate as? AppDelegate)?.ghostty.config.linkConfirmCustomSchemes == false {
+        // link-trusted-schemes lists schemes that skip the question.
+        let config = (NSApp.delegate as? AppDelegate)?.ghostty.config
+        if config?.linkConfirmCustomSchemes == false
+            || url.scheme.map({ config?.linkTrustedSchemes.contains($0.lowercased()) == true }) == true {
             _ = NSWorkspace.shared.open(url)
             return
         }

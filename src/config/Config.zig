@@ -1532,6 +1532,12 @@ link: RepeatableLink = .{},
 /// this setting.
 @"link-confirm-custom-schemes": bool = true,
 
+/// URL schemes that open without the custom-scheme confirmation, comma or
+/// space separated (e.g. `hammerspoon, clarc-observer`). Use it for schemes
+/// whose handlers you control. Read when a link is clicked, so a reloaded
+/// configuration applies at once. Only affects macOS.
+@"link-trusted-schemes": ?[:0]const u8 = null,
+
 /// Whether to start the window in a maximized state. This setting applies
 /// to new windows and does not apply to tabs, splits, etc. However, this setting
 /// will apply to all new windows, not just the first one.

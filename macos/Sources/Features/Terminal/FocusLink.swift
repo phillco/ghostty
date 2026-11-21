@@ -7,18 +7,21 @@ import AppKit
 /// its scheme is allowed: any process that prints OSC 8 can produce these links.
 @MainActor
 enum FocusLink {
+    /// Fallback schemes allowed without config; link-trusted-schemes adds more.
     static let fallbackSchemes: Set<String> = ["clarc-observer", "clarc", "hammerspoon", "https"]
 
-    /// The app's own URL scheme (`ghostty-phil`), the first in CFBundleURLTypes.
-    static var scheme: String? {
+    /// Schemes handled here: `ghostty-phil`, which links are printed with, and this build's own
+    /// (`ghostty-phil-test` in test builds), so a click is handled by the app it happens in.
+    static var schemes: Set<String> {
         let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]]
-        return (types?.first?["CFBundleURLSchemes"] as? [String])?.first
+        let own = (types?.first?["CFBundleURLSchemes"] as? [String])?.first
+        return Set(["ghostty-phil", own].compactMap { $0?.lowercased() })
     }
 
     /// Handles a focus link; false when `string` isn't one, so callers fall through.
     static func handle(_ string: String) -> Bool {
         guard let c = URLComponents(string: string),
-              let scheme, c.scheme?.lowercased() == scheme, c.host == "focus" else { return false }
+              let scheme = c.scheme?.lowercased(), schemes.contains(scheme), c.host == "focus" else { return false }
         let query = { (name: String) in c.queryItems?.first(where: { $0.name == name })?.value }
         if let tty = query("tty"), let view = surface(tty: tty),
            let controller = BaseTerminalController.controller(owning: view) {
@@ -29,7 +32,8 @@ enum FocusLink {
             return true
         }
         if let raw = query("fallback"), let url = URL(string: raw),
-           let s = url.scheme?.lowercased(), fallbackSchemes.contains(s) {
+           let s = url.scheme?.lowercased(), fallbackSchemes.contains(s)
+            || (NSApp.delegate as? AppDelegate)?.ghostty.config.linkTrustedSchemes.contains(s) == true {
             NSWorkspace.shared.open(url)
         } else {
             NSSound.beep()
