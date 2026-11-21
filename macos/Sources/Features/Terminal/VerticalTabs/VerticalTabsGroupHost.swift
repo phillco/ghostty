@@ -57,10 +57,13 @@ final class VerticalTabsGroupHost {
     private var windowsByID: [ObjectIdentifier: TerminalWindow] = [:]
     /// The tab selected last, so the next selection can stamp when it was left.
     weak var lastSelectedWindow: TerminalWindow?
+    /// The selected tab, when it was selected from Recents: it stays in Recents.
+    var keptRecent: ObjectIdentifier?
 
     init(tabGroup: NSWindowTabGroup, manager: VerticalTabsManager) {
         self.tabGroup = tabGroup
         self.manager = manager
+        lastSelectedWindow = tabGroup.selectedWindow as? TerminalWindow
         let view = NSHostingView(rootView: VerticalTabsSidebar(
             store: store,
             settings: manager.settings
@@ -164,7 +167,8 @@ final class VerticalTabsGroupHost {
         let settings = manager.settings
         let recentsOff = settings.recentsCollapsed || !settings.showRecents
         sections = VerticalTabs.sections(
-            tabs: tabs, pins: pins, recentsLimit: recentsOff ? 0 : VerticalTabs.recentsLimit)
+            tabs: tabs, pins: pins, recentsLimit: recentsOff ? 0 : VerticalTabs.recentsLimit,
+            keepInRecents: keptRecent)
         let hasRecents = settings.showRecents && VerticalTabs.hasRecentCandidates(tabs: tabs, pins: pins)
         if store.hasRecents != hasRecents { store.hasRecents = hasRecents }
         let now = Date()

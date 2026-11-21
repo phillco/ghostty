@@ -156,10 +156,79 @@ struct VerticalTabsModelTests {
     }
 
     @Test func agHostFile() throws {
-        let data = Data(#"{"pid":17346,"cwd":"/Users/p/src/PopLab","sessionId":"ebc60ada-ff4b","agyPid":17347,"client":17179,"clients":[17180]}"#.utf8)
+        let data = Data(#"{"pid":17346,"cwd":"/Users/p/src/PopLab","sessionId":"ebc60ada-ff4b","agyPid":17347,"client":17179,"clients":[17180],"socket":"/tmp/h.sock"}"#.utf8)
         let session = try #require(VerticalTabs.agHostSession(json: data, bridgeName: noBridge))
-        #expect(session.pids == [17179, 17180, 17347, 17346])
+        #expect(session.pids == [17179, 17180])
+        #expect(session.hostPID == 17346)
+        #expect(session.processNames == ["ag"])
         #expect(session.peerId == "agy-poplab-ebc6")
+    }
+
+    // MARK: Session matching
+
+    private func session(_ pid: Int32, _ peer: String, names: Set<String> = ["ag"],
+                         socket: String? = nil, host: Int32? = nil) -> VerticalTabs.AgentSession {
+        .init(pids: [pid], sessionId: "s\(pid)", peerId: peer, processNames: names, socketPath: socket, hostPID: host)
+    }
+
+    private func match(
+        _ terminals: [VerticalTabs.TerminalKey],
+        _ candidates: [VerticalTabs.AgentSession],
+        processes: [Int32: VerticalTabs.ProcessSnapshot],
+        files: Set<String> = []
+    ) -> String? {
+        VerticalTabs.matchSession(
+            terminals: terminals, candidates: candidates,
+            process: { processes[$0] }, fileExists: files.contains)?.peerId
+    }
+
+    @Test func focusedSplitWinsOverCandidateOrder() {
+        let claude = session(100, "bin-97", names: VerticalTabs.claudeProcessNames)
+        let agy = session(200, "agy-ghostty-85a9")
+        let processes: [Int32: VerticalTabs.ProcessSnapshot] = [
+            100: .init(name: "claude.exe", tty: 9),
+            200: .init(name: "ag", tty: 8),
+        ]
+        let agySplit = VerticalTabs.TerminalKey(device: 8, foregroundPID: 50)
+        let claudeSplit = VerticalTabs.TerminalKey(device: 9, foregroundPID: 51)
+        // Claude files are candidates first, but the focused (first) split decides.
+        #expect(match([agySplit, claudeSplit], [claude, agy], processes: processes) == "agy-ghostty-85a9")
+        #expect(match([claudeSplit, agySplit], [claude, agy], processes: processes) == "bin-97")
+        // The foreground PID matches without a TTY.
+        #expect(match([.init(device: nil, foregroundPID: 200)], [claude, agy], processes: processes) == "agy-ghostty-85a9")
+        #expect(match([.init(device: 7, foregroundPID: 1)], [claude, agy], processes: processes) == nil)
+        // Within one terminal, an exact foreground PID beats an earlier same-TTY candidate.
+        let sameTTY: [Int32: VerticalTabs.ProcessSnapshot] = [
+            100: .init(name: "claude.exe", tty: 8),
+            200: .init(name: "ag", tty: 8),
+        ]
+        #expect(match([.init(device: 8, foregroundPID: 200)], [claude, agy], processes: sameTTY) == "agy-ghostty-85a9")
+    }
+
+    @Test func staleSessionsNeverMatch() {
+        let term = VerticalTabs.TerminalKey(device: 8, foregroundPID: 300)
+        // A dead agent's PID reused by a shell on this TTY.
+        #expect(match([term], [session(300, "dead")], processes: [300: .init(name: "zsh", tty: 8)]) == nil)
+        // A dead PID that no longer exists.
+        #expect(match([term], [session(300, "dead")], processes: [:]) == nil)
+        // A live process whose socket is gone.
+        let ag: [Int32: VerticalTabs.ProcessSnapshot] = [300: .init(name: "ag", tty: 8), 400: .init(name: "ag", tty: nil)]
+        #expect(match([term], [session(300, "a", socket: "/tmp/x.sock")], processes: ag) == nil)
+        #expect(match([term], [session(300, "a", socket: "/tmp/x.sock")], processes: ag, files: ["/tmp/x.sock"]) == "a")
+        // ag-host: the host must be alive and an ag process.
+        #expect(match([term], [session(300, "h", host: 401)], processes: ag) == nil)
+        #expect(match([term], [session(300, "h", host: 400)], processes: ag) == "h")
+    }
+
+    @Test func parsedSessionsCarryValidation() throws {
+        let claude = try #require(VerticalTabs.claudeSession(json: Data(
+            #"{"pid":5,"sessionId":"edfb2ff9","messagingSocketPath":"/tmp/cc-socks/5.sock"}"#.utf8)))
+        #expect(claude.socketPath == "/tmp/cc-socks/5.sock")
+        #expect(claude.processNames.contains("claude.exe"))
+        let ready = try #require(VerticalTabs.clarcSession(json: Data(
+            #"{"agent":"agy","pid":6,"sessionId":"125baf20","socket":"/tmp/c.sock"}"#.utf8), bridgeName: noBridge))
+        #expect(ready.socketPath == "/tmp/c.sock")
+        #expect(ready.processNames == ["ag"])
     }
 
     // MARK: Settings
@@ -332,6 +401,27 @@ struct VerticalTabsModelTests {
         let b = VerticalTabs.sections(tabs: fromOpen, pins: [])
         #expect(ids(b.recents) == [id(0), id(1)])
         #expect(ids(b.open) == [id(2)])
+    }
+
+    @Test func oldestRecentSelectedFromOpenStaysInRecents() {
+        // Recents 1–4 full; Open tab 0 is selected, then the 4th Recent is clicked,
+        // which stamps tab 0 as just left.
+        let tabs = [
+            tab(0, left: 100),
+            tab(1, left: 40), tab(2, left: 30), tab(3, left: 20),
+            tab(4, selected: true, left: 10),
+            tab(5),
+        ]
+        let without = VerticalTabs.sections(tabs: tabs, pins: [])
+        #expect(ids(without.recents) == [id(0), id(1), id(2), id(3)])
+
+        let kept = VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: id(4))
+        #expect(ids(kept.recents) == [id(0), id(1), id(2), id(4)])
+        #expect(ids(kept.open) == [id(3), id(5)])
+        // Already within the limit: no change; ineligible (never left): ignored.
+        #expect(VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: id(1)) == without)
+        #expect(VerticalTabs.sections(tabs: tabs, pins: [], keepInRecents: id(5)) == without)
+        #expect(VerticalTabs.sections(tabs: tabs, pins: [], recentsLimit: 0, keepInRecents: id(4)).recents.isEmpty)
     }
 
     @Test func pinnedFollowPinOrderNotTabOrder() {

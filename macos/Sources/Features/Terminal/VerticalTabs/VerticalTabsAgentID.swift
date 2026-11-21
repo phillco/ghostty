@@ -5,9 +5,16 @@ import Foundation
 extension VerticalTabs {
     /// An agent session from a discovery file, with the processes that may own a tab.
     struct AgentSession: Equatable {
+        /// Processes that may sit on the tab's TTY.
         let pids: [Int32]
         let sessionId: String
         let peerId: String
+        /// Executable names (`pbi_comm`) a live owner has; a reused PID won't.
+        var processNames: Set<String> = []
+        /// A socket the live session keeps, if its file names one.
+        var socketPath: String?
+        /// A host process that must still be alive, with one of `processNames`.
+        var hostPID: Int32?
 
         /// What Copy ID puts on the pasteboard.
         var copyText: String { "\(sessionId) (\(peerId))" }
@@ -63,7 +70,7 @@ extension VerticalTabs {
         guard !sessionId.isEmpty, !sessionId.contains("/") else { return nil }
         let path = FileManager.default.homeDirectoryForCurrentUser.path
             + "/.local/state/cc-bridge/threads/" + sessionId
-        return FileManager.default.contents(atPath: path).flatMap { String(data: $0, encoding: .utf8) }
+        return FileManager.default.contents(atPath: path).flatMap { String(bytes: $0, encoding: .utf8) }
     }
 
     /// `peers.agyName` (`ag.go`): a bridge registration, else `DefaultName`.
@@ -90,7 +97,8 @@ extension VerticalTabs {
               let id = obj["sessionId"] as? String, !id.isEmpty else { return nil }
         let name = (obj["name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         return .init(pids: [pid], sessionId: id,
-                     peerId: name ?? defaultPeerName(agent: "claude", id: id, cwd: ""))
+                     peerId: name ?? defaultPeerName(agent: "claude", id: id, cwd: ""),
+                     processNames: claudeProcessNames, socketPath: obj["messagingSocketPath"] as? String)
     }
 
     /// `/tmp/claude-clarc-<pid>.ready`, written by `ag` and Clarc-hosted Claude.
@@ -104,7 +112,9 @@ extension VerticalTabs {
         let peerId = agent == "agy"
             ? agyPeerName(id: id, cwd: cwd, bridgeName: bridgeName)
             : defaultPeerName(agent: agent, id: id, cwd: cwd)
-        return .init(pids: [pid], sessionId: id, peerId: peerId)
+        return .init(pids: [pid], sessionId: id, peerId: peerId,
+                     processNames: agent == "agy" ? agyProcessNames : claudeProcessNames,
+                     socketPath: obj["socket"] as? String)
     }
 
     /// `/tmp/ag-host-<pid>.json`: mirrored `ag` sessions without a `.ready` file.
@@ -114,31 +124,82 @@ extension VerticalTabs {
         guard let obj = json(data), let id = obj["sessionId"] as? String, !id.isEmpty else { return nil }
         let clients = (obj["clients"] as? [Any] ?? []).compactMap { pid($0) }
         let pids = [pid(obj["client"])].compactMap { $0 } + clients
-            + [pid(obj["agyPid"]), pid(obj["pid"])].compactMap { $0 }
-        guard !pids.isEmpty else { return nil }
+        guard !pids.isEmpty, let host = pid(obj["pid"]) else { return nil }
         return .init(pids: pids, sessionId: id,
-                     peerId: agyPeerName(id: id, cwd: obj["cwd"] as? String ?? "", bridgeName: bridgeName))
+                     peerId: agyPeerName(id: id, cwd: obj["cwd"] as? String ?? "", bridgeName: bridgeName),
+                     processNames: agyProcessNames, socketPath: obj["socket"] as? String, hostPID: host)
+    }
+
+    static let claudeProcessNames: Set<String> = ["claude", "claude.exe", "node", "bun"]
+    static let agyProcessNames: Set<String> = ["ag"]
+
+    /// What Copy ID needs to know about a live process.
+    struct ProcessSnapshot: Equatable {
+        let name: String
+        /// Controlling terminal device, if any.
+        let tty: UInt32?
+    }
+
+    /// A terminal to match: its TTY device and foreground process.
+    struct TerminalKey: Equatable {
+        let device: UInt32?
+        let foregroundPID: Int32?
+    }
+
+    /// The session owning the first terminal (in order, focused split first) that
+    /// any live candidate matches. A candidate matches a terminal when one of its
+    /// PIDs is a live process with an expected name that is the terminal's
+    /// foreground process (preferred) or on its TTY. Stale files (gone socket,
+    /// dead host, reused PID) never match.
+    static func matchSession(
+        terminals: [TerminalKey],
+        candidates: [AgentSession],
+        process: (Int32) -> ProcessSnapshot?,
+        fileExists: (String) -> Bool
+    ) -> AgentSession? {
+        func owner(_ pid: Int32, of session: AgentSession) -> ProcessSnapshot? {
+            guard let snapshot = process(pid), session.processNames.contains(snapshot.name) else { return nil }
+            return snapshot
+        }
+        let live = candidates.filter { session in
+            (session.socketPath.map(fileExists) ?? true)
+                && (session.hostPID.map { owner($0, of: session) != nil } ?? true)
+        }
+        for terminal in terminals {
+            let foreground = live.first { session in
+                session.pids.contains { $0 == terminal.foregroundPID && owner($0, of: session) != nil }
+            }
+            if let foreground { return foreground }
+            guard let device = terminal.device else { continue }
+            let onTTY = live.first { session in
+                session.pids.contains { owner($0, of: session)?.tty == device }
+            }
+            if let onTTY { return onTTY }
+        }
+        return nil
     }
 }
 
 /// Finds the agent session running in a terminal by controlling TTY: a tab's
 /// foreground process is often `login`, with the agent a descendant on that TTY.
 enum VerticalTabsAgentLookup {
-    /// One surface's terminal: its TTY device and foreground process.
+    /// One surface's terminal: its TTY name and foreground process.
     struct Terminal {
         let ttyName: String?
         let foregroundPID: Int?
     }
 
+    /// Terminals in priority order (focused split first).
     static func session(for terminals: [Terminal]) -> VerticalTabs.AgentSession? {
-        let devices = Set(terminals.compactMap { $0.ttyName.flatMap(device) })
-        let foreground = Set(terminals.compactMap { $0.foregroundPID.flatMap { Int32(exactly: $0) } })
-        guard !devices.isEmpty || !foreground.isEmpty else { return nil }
-        return candidates().first { session in
-            session.pids.contains { pid in
-                foreground.contains(pid) || controllingTTY(of: pid).map(devices.contains) == true
-            }
+        let keys = terminals.map {
+            VerticalTabs.TerminalKey(
+                device: $0.ttyName.flatMap(device),
+                foregroundPID: $0.foregroundPID.flatMap { Int32(exactly: $0) })
         }
+        guard keys.contains(where: { $0.device != nil || $0.foregroundPID != nil }) else { return nil }
+        return VerticalTabs.matchSession(
+            terminals: keys, candidates: candidates(), process: process,
+            fileExists: FileManager.default.fileExists(atPath:))
     }
 
     /// Claude's own session files first, so Claude tabs get their registered name.
@@ -150,10 +211,18 @@ enum VerticalTabsAgentLookup {
             + files(in: "/tmp", prefix: "ag-host-", suffix: ".json").compactMap { VerticalTabs.agHostSession(json: $0) }
     }
 
+    /// Regular files we own only: `/tmp` is shared, and a symlink or another
+    /// user's file must not supply a session identity.
     private static func files(in dir: String, prefix: String, suffix: String) -> [Data] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
-        return names.filter { $0.hasPrefix(prefix) && $0.hasSuffix(suffix) }
-            .compactMap { FileManager.default.contents(atPath: dir + "/" + $0) }
+        let fm = FileManager.default
+        let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
+        return names.filter { $0.hasPrefix(prefix) && $0.hasSuffix(suffix) }.compactMap { name in
+            let path = dir + "/" + name
+            guard let attrs = try? fm.attributesOfItem(atPath: path),
+                  attrs[.type] as? FileAttributeType == .typeRegular,
+                  (attrs[.ownerAccountID] as? NSNumber)?.uint32Value == getuid() else { return nil }
+            return fm.contents(atPath: path)
+        }
     }
 
     private static func device(_ ttyName: String) -> UInt32? {
@@ -162,11 +231,13 @@ enum VerticalTabsAgentLookup {
         return UInt32(bitPattern: info.st_rdev)
     }
 
-    private static func controllingTTY(of pid: Int32) -> UInt32? {
+    /// `nil` for a process that's gone (or not ours to inspect).
+    private static func process(_ pid: Int32) -> VerticalTabs.ProcessSnapshot? {
         var info = proc_bsdinfo()
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
         guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        let name = withUnsafeBytes(of: info.pbi_comm) { String(bytes: $0.prefix { $0 != 0 }, encoding: .utf8) } ?? ""
         // NODEV (-1) means no controlling terminal.
-        return info.e_tdev == UInt32.max ? nil : info.e_tdev
+        return .init(name: name, tty: info.e_tdev == UInt32.max ? nil : info.e_tdev)
     }
 }

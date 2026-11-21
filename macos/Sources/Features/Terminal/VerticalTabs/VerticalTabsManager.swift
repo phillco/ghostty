@@ -136,6 +136,8 @@ final class VerticalTabsManager: NSObject {
             tracker(for: previous).lastLeft = now
         }
         host.lastSelectedWindow = window
+        let id = ObjectIdentifier(window)
+        host.keptRecent = host.sections.recents.contains { $0.id == id } ? id : nil
         tracker(for: window).lastActive = now
         syncTabBar(of: window)
         let inset = leadingInset(for: window)

@@ -204,7 +204,11 @@ enum VerticalTabs {
     ///   by when a tab was left, not focused, keeps a tab selected from Recents
     ///   in Recents and one selected from Open in Open.
     /// - Open keeps tab group order for everything else.
-    static func sections(tabs: [Tab], pins: [String], recentsLimit: Int = recentsLimit) -> Sections {
+    /// - `keepInRecents`: a tab selected from Recents stays there even when the
+    ///   tab just left pushes it past `recentsLimit`; the oldest other Recent yields.
+    static func sections(
+        tabs: [Tab], pins: [String], recentsLimit: Int = recentsLimit, keepInRecents: ObjectIdentifier? = nil
+    ) -> Sections {
         var result = Sections()
         var used = Set<ObjectIdentifier>()
 
@@ -215,11 +219,15 @@ enum VerticalTabs {
         }
 
         if recentsLimit > 0 {
-            result.recents = tabs
+            let eligible = tabs
                 .filter { !used.contains($0.id) && $0.lastLeft != nil }
                 .sorted { $0.lastLeft! > $1.lastLeft! }
-                .prefix(recentsLimit)
-                .map { $0 }
+            result.recents = Array(eligible.prefix(recentsLimit))
+            if let keep = keepInRecents, !result.recents.contains(where: { $0.id == keep }),
+               let kept = eligible.first(where: { $0.id == keep }) {
+                // Past the limit means Recents is full and `kept` is older than all of it.
+                result.recents[result.recents.count - 1] = kept
+            }
             used.formUnion(result.recents.map(\.id))
         }
 
