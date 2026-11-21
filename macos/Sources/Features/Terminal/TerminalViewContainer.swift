@@ -47,17 +47,31 @@ class TerminalViewContainer: NSView {
         // Fall back to initialContentSize in that case.
         if let initialContentSize,
            hostingSize.width < initialContentSize.width || hostingSize.height < initialContentSize.height {
-            return initialContentSize
+            return NSSize(width: initialContentSize.width + leadingInset, height: initialContentSize.height)
         }
-        return hostingSize
+        return NSSize(width: hostingSize.width + leadingInset, height: hostingSize.height)
     }
+
+    /// Space reserved on the leading edge for the vertical tab sidebar. Every tab
+    /// in a group uses the same inset so switching tabs never resizes a surface.
+    var leadingInset: CGFloat = 0 {
+        didSet {
+            guard leadingInset != oldValue else { return }
+            terminalLeadingConstraint?.constant = leadingInset
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    private var terminalLeadingConstraint: NSLayoutConstraint?
 
     private func setup() {
         addSubview(terminalView)
         terminalView.translatesAutoresizingMaskIntoConstraints = false
+        let leading = terminalView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leadingInset)
+        terminalLeadingConstraint = leading
         NSLayoutConstraint.activate([
             terminalView.topAnchor.constraint(equalTo: topAnchor),
-            terminalView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            leading,
             terminalView.bottomAnchor.constraint(equalTo: bottomAnchor),
             terminalView.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])

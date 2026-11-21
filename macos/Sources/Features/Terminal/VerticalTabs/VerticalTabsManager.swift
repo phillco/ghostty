@@ -1,0 +1,293 @@
+import AppKit
+import Combine
+import SwiftUI
+
+/// Hosts the vertical tab sidebar.
+///
+/// `NSWindowTabGroup` stays the tab model: every tab is still a `TerminalWindow`,
+/// so tab history, goto/move tab, AppleScript and splits keep working. In vertical
+/// mode the native tab bar accessory is hidden and every terminal container gets the
+/// same leading inset, so switching tabs never resizes a PTY. Each tab group owns one
+/// live sidebar, which moves into whichever window of the group is selected.
+final class VerticalTabsManager: NSObject {
+    static let shared = VerticalTabsManager()
+
+    let settings = VerticalTabsSettings.shared
+
+    private var hosts: [ObjectIdentifier: VerticalTabsGroupHost] = [:]
+    private var trackers: [ObjectIdentifier: WindowTracker] = [:]
+    private var observers: [NSObjectProtocol] = []
+    private var ageTimer: Timer?
+    private var started = false
+
+    var isEnabled: Bool { settings.enabled }
+
+    /// The leading inset every terminal container should use right now.
+    var leadingInset: CGFloat { isEnabled ? settings.width : 0 }
+
+    // MARK: Lifecycle
+
+    /// Call once at launch, after the main menu loads.
+    func start() {
+        guard !started else { return }
+        started = true
+
+        installMenuItems()
+
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(
+            forName: NSWindow.didBecomeMainNotification, object: nil, queue: .main
+        ) { [weak self] n in
+            guard let window = n.object as? TerminalWindow else { return }
+            self?.windowDidBecomeMain(window)
+        })
+        observers.append(center.addObserver(
+            forName: NSWindow.willCloseNotification, object: nil, queue: .main
+        ) { [weak self] n in
+            guard let window = n.object as? TerminalWindow else { return }
+            self?.trackers[ObjectIdentifier(window)] = nil
+            DispatchQueue.main.async { self?.refreshAll() }
+        })
+        // Restored or background windows may never become main; give their
+        // groups a sidebar once they finish loading.
+        observers.append(center.addObserver(
+            forName: TerminalWindow.terminalDidAwake, object: nil, queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(250)) { self?.refreshAll() }
+        })
+
+        if isEnabled { applyEnabled() }
+    }
+
+    func toggle() {
+        settings.enabled.toggle()
+        applyEnabled()
+    }
+
+    private func applyEnabled() {
+        for window in terminalWindows {
+            window.terminalViewContainerForVerticalTabs?.leadingInset = leadingInset
+            syncTabBar(of: window)
+        }
+
+        if isEnabled {
+            ageTimer?.invalidate()
+            let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in self?.refreshAll() }
+            timer.tolerance = 10
+            RunLoop.main.add(timer, forMode: .common)
+            ageTimer = timer
+            refreshAll()
+        } else {
+            ageTimer?.invalidate()
+            ageTimer = nil
+            hosts.values.forEach { $0.tearDown() }
+            hosts = [:]
+            trackers = [:]
+        }
+    }
+
+    // MARK: Hooks called from terminal windows
+
+    /// Hides or restores AppKit's native tab bar accessory for this window.
+    func syncTabBar(of window: TerminalWindow) {
+        for controller in window.titlebarAccessoryViewControllers where window.isTabBar(controller) {
+            if controller.isHidden != isEnabled { controller.isHidden = isEnabled }
+        }
+    }
+
+    /// `Cmd+1..9` in vertical mode: Pinned then Open, skipping Recents.
+    func window(forShortcut number: Int, in tabGroup: NSWindowTabGroup) -> NSWindow? {
+        guard isEnabled else { return nil }
+        let host = host(for: tabGroup)
+        host.refresh()
+        return host.window(forShortcut: number)
+    }
+
+    // MARK: Windows
+
+    private var terminalWindows: [TerminalWindow] {
+        NSApp.windows.compactMap { $0 as? TerminalWindow }
+    }
+
+    private func windowDidBecomeMain(_ window: TerminalWindow) {
+        guard isEnabled, let tabGroup = window.tabGroup else { return }
+        tracker(for: window).lastFocused = Date()
+        tracker(for: window).lastActive = Date()
+        syncTabBar(of: window)
+        if window.terminalViewContainerForVerticalTabs?.leadingInset != leadingInset {
+            window.terminalViewContainerForVerticalTabs?.leadingInset = leadingInset
+        }
+        let host = host(for: tabGroup)
+        host.attach(to: window)
+        host.refresh()
+    }
+
+    private func host(for tabGroup: NSWindowTabGroup) -> VerticalTabsGroupHost {
+        let key = ObjectIdentifier(tabGroup)
+        if let host = hosts[key], host.tabGroup === tabGroup { return host }
+        let host = VerticalTabsGroupHost(tabGroup: tabGroup, manager: self)
+        hosts[key] = host
+        return host
+    }
+
+    func refreshAll() {
+        guard isEnabled else { return }
+
+        // Make sure every group with a visible window has a host.
+        for window in terminalWindows {
+            guard let tabGroup = window.tabGroup, tabGroup.selectedWindow === window else { continue }
+            _ = host(for: tabGroup)
+        }
+
+        for (key, host) in hosts {
+            if host.tabGroup?.windows.isEmpty ?? true {
+                host.tearDown()
+                hosts[key] = nil
+            } else {
+                host.refresh()
+            }
+        }
+    }
+
+    func tracker(for window: TerminalWindow) -> WindowTracker {
+        let key = ObjectIdentifier(window)
+        if let tracker = trackers[key] { return tracker }
+        let tracker = WindowTracker(window: window) { [weak self, weak window] in
+            guard let self, let group = window?.tabGroup else { return }
+            self.hosts[ObjectIdentifier(group)]?.scheduleRefresh()
+        }
+        trackers[key] = tracker
+        return tracker
+    }
+
+    // MARK: Width
+
+    /// Live width while dragging the divider: only the visible window resizes.
+    func setLiveWidth(_ width: CGFloat, in window: NSWindow?) {
+        let width = VerticalTabsSettings.clamp(width)
+        hosts.values.forEach { $0.setSidebarWidth(width) }
+        (window as? TerminalWindow)?.terminalViewContainerForVerticalTabs?.leadingInset = width
+    }
+
+    /// Commits a width: persists it and applies it to every terminal window.
+    func commitWidth(_ width: CGFloat) {
+        settings.width = VerticalTabsSettings.clamp(width)
+        hosts.values.forEach { $0.setSidebarWidth(settings.width) }
+        for window in terminalWindows {
+            window.terminalViewContainerForVerticalTabs?.leadingInset = leadingInset
+        }
+    }
+
+    // MARK: Menu
+
+    private static let menuTag = 0x7674_6162 // "vtab"
+
+    private func installMenuItems() {
+        guard let viewMenu = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "View" })?.submenu,
+              !viewMenu.items.contains(where: { $0.tag == Self.menuTag }) else { return }
+
+        func item(_ title: String, _ action: Selector, _ key: String, _ mods: NSEvent.ModifierFlags) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = mods
+            item.target = self
+            item.tag = Self.menuTag
+            return item
+        }
+
+        let separator = NSMenuItem.separator()
+        separator.tag = Self.menuTag
+        viewMenu.addItem(separator)
+        viewMenu.addItem(item("Show Vertical Tabs", #selector(toggleVerticalTabs(_:)), "s", [.control, .command]))
+        viewMenu.addItem(item("Pin Tab", #selector(togglePinTab(_:)), "p", [.option, .command]))
+        viewMenu.addItem(item("Filter Tabs", #selector(focusTabFilter(_:)), "f", [.option, .command]))
+        viewMenu.addItem(item("Tall Tab Rows", #selector(toggleDensity(_:)), "", []))
+    }
+
+    private var mainTerminalWindow: TerminalWindow? {
+        (NSApp.mainWindow ?? NSApp.keyWindow) as? TerminalWindow
+    }
+
+    @objc func toggleVerticalTabs(_ sender: Any?) {
+        toggle()
+    }
+
+    @objc func togglePinTab(_ sender: Any?) {
+        guard isEnabled, let window = mainTerminalWindow, let tabGroup = window.tabGroup else { return }
+        host(for: tabGroup).togglePin(ObjectIdentifier(window))
+    }
+
+    @objc func focusTabFilter(_ sender: Any?) {
+        guard isEnabled, let window = mainTerminalWindow, let tabGroup = window.tabGroup else { return }
+        let host = host(for: tabGroup)
+        host.attach(to: window)
+        host.focusFilter()
+    }
+
+    @objc func toggleDensity(_ sender: Any?) {
+        settings.density = settings.density == .compact ? .tall : .compact
+    }
+}
+
+extension VerticalTabsManager: NSMenuItemValidation {
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(toggleVerticalTabs(_:)):
+            item.title = isEnabled ? "Hide Vertical Tabs" : "Show Vertical Tabs"
+            return true
+
+        case #selector(togglePinTab(_:)):
+            guard isEnabled, let window = mainTerminalWindow, let tabGroup = window.tabGroup else {
+                item.title = "Pin Tab"
+                return false
+            }
+            let pinned = host(for: tabGroup).isPinned(ObjectIdentifier(window))
+            item.title = pinned ? "Unpin Tab" : "Pin Tab"
+            return true
+
+        case #selector(focusTabFilter(_:)):
+            return isEnabled && mainTerminalWindow != nil
+
+        case #selector(toggleDensity(_:)):
+            item.state = settings.density == .tall ? .on : .off
+            return isEnabled
+
+        default:
+            return true
+        }
+    }
+}
+
+// MARK: - Window tracking
+
+/// Per-window bookkeeping: focus and activity times plus cheap observers that
+/// schedule a (throttled) sidebar refresh.
+final class WindowTracker {
+    var lastFocused: Date?
+    var lastActive: Date?
+    /// The pin key this tab matched on the last refresh.
+    var claimedPinKey: String?
+
+    private var titleObservation: NSKeyValueObservation?
+    private var bellCancellable: AnyCancellable?
+
+    init(window: TerminalWindow, onChange: @escaping () -> Void) {
+        titleObservation = window.observe(\.title, options: [.new]) { [weak self] _, _ in
+            // Spinner frames change the raw title often; record activity and let
+            // the throttled refresh decide whether anything visible changed.
+            self?.lastActive = Date()
+            onChange()
+        }
+        bellCancellable = window.terminalController?.$bell
+            .removeDuplicates()
+            .dropFirst()
+            .sink { _ in onChange() }
+    }
+}
+
+// MARK: - Container access
+
+extension TerminalWindow {
+    var terminalViewContainerForVerticalTabs: TerminalViewContainer? {
+        contentView as? TerminalViewContainer
+    }
+}

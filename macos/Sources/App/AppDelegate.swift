@@ -235,6 +235,9 @@ class AppDelegate: NSObject,
         // Register our service provider. This must happen after everything is initialized.
         NSApp.servicesProvider = ServiceProvider()
 
+        // Vertical tab sidebar (View menu items, sidebar hosting).
+        VerticalTabsManager.shared.start()
+
         // This registers the Ghostty => Services menu to exist.
         NSApp.servicesMenu = menuServices
 

@@ -1275,6 +1275,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // without waiting for @FocusedValue to propagate through the
         // SwiftUI focus chain.
         container.initialContentSize = focusedSurface?.initialSize
+        container.leadingInset = VerticalTabsManager.shared.leadingInset
 
         window.contentView = container
 
@@ -1840,6 +1841,12 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         } else {
             // The configured value is 1-indexed.
             guard tabIndex >= 1 else { return }
+
+            // Vertical tabs number Pinned then Open rows, skipping Recents.
+            if let target = VerticalTabsManager.shared.window(forShortcut: Int(tabIndex), in: tabGroup) {
+                target.makeKeyAndOrderFront(nil)
+                return
+            }
 
             // If our index is outside our boundary then we use the max
             finalIndex = min(Int(tabIndex - 1), tabbedWindows.count - 1)

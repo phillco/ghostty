@@ -261,6 +261,7 @@ class TerminalWindow: NSWindow {
         if isTabBar(childViewController) {
             childViewController.identifier = Self.tabBarIdentifier
             tabBarDidAppear()
+            VerticalTabsManager.shared.syncTabBar(of: self)
         }
     }
 
