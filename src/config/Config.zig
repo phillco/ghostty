@@ -3482,7 +3482,9 @@ keybind: Keybinds = .{},
 @"vertical-tabs-recents-dwell": f64 = 1.0,
 
 /// macOS only. The most characters a vertical tabs folder pill shows before
-/// truncating with `…`. `0` never truncates. Changes apply on config reload.
+/// truncating with `…`. `0` removes the character limit. Either way a pill
+/// never takes more than 40% of the sidebar's width, so a long name still
+/// truncates there. Changes apply on config reload.
 @"vertical-tabs-pill-max-chars": u16 = 12,
 
 /// The style of the macOS titlebar. Available values are: "native",
