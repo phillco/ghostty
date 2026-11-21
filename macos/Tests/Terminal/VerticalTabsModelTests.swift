@@ -121,21 +121,43 @@ struct VerticalTabsModelTests {
         #expect(VerticalTabs.claudeSession(json: unnamed)?.peerId == "cc-edfb2ff9")
         #expect(VerticalTabs.claudeSession(json: Data(#"{"sessionId":"x"}"#.utf8)) == nil)
         #expect(VerticalTabs.claudeSession(json: Data("not json".utf8)) == nil)
+        let mailbox = Data(#"{"pid":5,"sessionId":"edfb2ff9","name":"cc-mailbox","ccMailbox":true}"#.utf8)
+        #expect(VerticalTabs.claudeSession(json: mailbox) == nil)
+        let notMailbox = Data(#"{"pid":5,"sessionId":"edfb2ff9","ccMailbox":false}"#.utf8)
+        #expect(VerticalTabs.claudeSession(json: notMailbox) != nil)
     }
+
+    private let noBridge: VerticalTabs.BridgeNameReader = { _ in nil }
 
     @Test func clarcReadyFile() throws {
         let agy = Data(#"{"agent":"agy","cwd":"/Users/p/src/ports/ghostty","pid":17266,"sessionId":"85a92d14-377f-4112-9bb3-614db07e7b4f"}"#.utf8)
-        let session = try #require(VerticalTabs.clarcSession(json: agy))
+        let session = try #require(VerticalTabs.clarcSession(json: agy, bridgeName: noBridge))
         #expect(session.pids == [17266])
         #expect(session.copyText == "85a92d14-377f-4112-9bb3-614db07e7b4f (agy-ghostty-85a9)")
 
         let claude = Data(#"{"agent":"claude","cwd":"/x","pid":3,"sessionId":"edfb2ff9-6c83"}"#.utf8)
-        #expect(VerticalTabs.clarcSession(json: claude)?.peerId == "cc-edfb2ff9")
+        #expect(VerticalTabs.clarcSession(json: claude, bridgeName: noBridge)?.peerId == "cc-edfb2ff9")
+    }
+
+    @Test func bridgeNameOverridesAgyDefault() throws {
+        let id = "125baf20-845c-40f2-86fa-a71852410ef4"
+        let bridge: VerticalTabs.BridgeNameReader = { $0 == id ? "Gemini Usage Cost & Caching\n" : nil }
+        let ready = Data(#"{"agent":"agy","cwd":"/Users/p/bin","pid":17063,"sessionId":"\#(id)"}"#.utf8)
+        let session = try #require(VerticalTabs.clarcSession(json: ready, bridgeName: bridge))
+        #expect(session.copyText == "\(id) (gemini-usage-cost-caching)")
+
+        let host = Data(#"{"pid":1,"client":2,"cwd":"/Users/p/bin","sessionId":"\#(id)"}"#.utf8)
+        #expect(VerticalTabs.agHostSession(json: host, bridgeName: bridge)?.peerId == "gemini-usage-cost-caching")
+
+        // Blank registrations fall back; Claude never consults the bridge.
+        #expect(VerticalTabs.agyPeerName(id: id, cwd: "/Users/p/bin", bridgeName: { _ in " \n" }) == "agy-bin-125b")
+        let claude = Data(#"{"agent":"claude","cwd":"/x","pid":3,"sessionId":"\#(id)"}"#.utf8)
+        #expect(VerticalTabs.clarcSession(json: claude, bridgeName: bridge)?.peerId == "cc-125baf20")
     }
 
     @Test func agHostFile() throws {
         let data = Data(#"{"pid":17346,"cwd":"/Users/p/src/PopLab","sessionId":"ebc60ada-ff4b","agyPid":17347,"client":17179,"clients":[17180]}"#.utf8)
-        let session = try #require(VerticalTabs.agHostSession(json: data))
+        let session = try #require(VerticalTabs.agHostSession(json: data, bridgeName: noBridge))
         #expect(session.pids == [17179, 17180, 17347, 17346])
         #expect(session.peerId == "agy-poplab-ebc6")
     }

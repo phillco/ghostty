@@ -54,6 +54,27 @@ extension VerticalTabs {
         return prefix + "-" + id.prefix(8)
     }
 
+    /// Reads a session's raw name from `cc-send`'s bridge registrations.
+    typealias BridgeNameReader = (_ sessionId: String) -> String?
+
+    /// `~/.local/state/cc-bridge/threads/<sessionId>`, where `cc-send` registers
+    /// a conversation's peer name.
+    static func bridgeThreadName(_ sessionId: String) -> String? {
+        guard !sessionId.isEmpty, !sessionId.contains("/") else { return nil }
+        let path = FileManager.default.homeDirectoryForCurrentUser.path
+            + "/.local/state/cc-bridge/threads/" + sessionId
+        return FileManager.default.contents(atPath: path).flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    /// `peers.agyName` (`ag.go`): a bridge registration, else `DefaultName`.
+    static func agyPeerName(id: String, cwd: String, bridgeName: BridgeNameReader) -> String {
+        if let raw = bridgeName(id) {
+            let name = peerSlug(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+            if !name.isEmpty { return name }
+        }
+        return defaultPeerName(agent: "agy", id: id, cwd: cwd)
+    }
+
     private static func json(_ data: Data) -> [String: Any]? {
         (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
@@ -63,8 +84,9 @@ extension VerticalTabs {
     }
 
     /// `~/.claude/sessions/<pid>.json`: the peer name is `name`, else `cc-<id8>`.
+    /// Mailbox daemons (`ccMailbox`) aren't interactive sessions.
     static func claudeSession(json data: Data) -> AgentSession? {
-        guard let obj = json(data), let pid = pid(obj["pid"]),
+        guard let obj = json(data), obj["ccMailbox"] as? Bool != true, let pid = pid(obj["pid"]),
               let id = obj["sessionId"] as? String, !id.isEmpty else { return nil }
         let name = (obj["name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         return .init(pids: [pid], sessionId: id,
@@ -72,23 +94,30 @@ extension VerticalTabs {
     }
 
     /// `/tmp/claude-clarc-<pid>.ready`, written by `ag` and Clarc-hosted Claude.
-    static func clarcSession(json data: Data) -> AgentSession? {
+    static func clarcSession(
+        json data: Data, bridgeName: BridgeNameReader = bridgeThreadName
+    ) -> AgentSession? {
         guard let obj = json(data), let pid = pid(obj["pid"]),
               let id = obj["sessionId"] as? String, !id.isEmpty else { return nil }
         let agent = obj["agent"] as? String ?? "claude"
-        return .init(pids: [pid], sessionId: id,
-                     peerId: defaultPeerName(agent: agent, id: id, cwd: obj["cwd"] as? String ?? ""))
+        let cwd = obj["cwd"] as? String ?? ""
+        let peerId = agent == "agy"
+            ? agyPeerName(id: id, cwd: cwd, bridgeName: bridgeName)
+            : defaultPeerName(agent: agent, id: id, cwd: cwd)
+        return .init(pids: [pid], sessionId: id, peerId: peerId)
     }
 
     /// `/tmp/ag-host-<pid>.json`: mirrored `ag` sessions without a `.ready` file.
-    static func agHostSession(json data: Data) -> AgentSession? {
+    static func agHostSession(
+        json data: Data, bridgeName: BridgeNameReader = bridgeThreadName
+    ) -> AgentSession? {
         guard let obj = json(data), let id = obj["sessionId"] as? String, !id.isEmpty else { return nil }
         let clients = (obj["clients"] as? [Any] ?? []).compactMap { pid($0) }
         let pids = [pid(obj["client"])].compactMap { $0 } + clients
             + [pid(obj["agyPid"]), pid(obj["pid"])].compactMap { $0 }
         guard !pids.isEmpty else { return nil }
         return .init(pids: pids, sessionId: id,
-                     peerId: defaultPeerName(agent: "agy", id: id, cwd: obj["cwd"] as? String ?? ""))
+                     peerId: agyPeerName(id: id, cwd: obj["cwd"] as? String ?? "", bridgeName: bridgeName))
     }
 }
 
@@ -117,8 +146,8 @@ enum VerticalTabsAgentLookup {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return files(in: home + "/.claude/sessions", prefix: "", suffix: ".json")
             .compactMap(VerticalTabs.claudeSession)
-            + files(in: "/tmp", prefix: "claude-clarc-", suffix: ".ready").compactMap(VerticalTabs.clarcSession)
-            + files(in: "/tmp", prefix: "ag-host-", suffix: ".json").compactMap(VerticalTabs.agHostSession)
+            + files(in: "/tmp", prefix: "claude-clarc-", suffix: ".ready").compactMap { VerticalTabs.clarcSession(json: $0) }
+            + files(in: "/tmp", prefix: "ag-host-", suffix: ".json").compactMap { VerticalTabs.agHostSession(json: $0) }
     }
 
     private static func files(in dir: String, prefix: String, suffix: String) -> [Data] {
