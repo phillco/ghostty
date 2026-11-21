@@ -179,7 +179,7 @@ final class VerticalTabsManager: NSObject {
         let id = ObjectIdentifier(window)
         let kept: Set<ObjectIdentifier> = host.sections.recents.contains { $0.id == id } ? [id] : []
         host.keptRecents = dwelled ? kept : host.keptRecents.union(kept)
-        if !dwelled { settleWalk(in: host, on: window) }
+        if !dwelled { settleWalk(in: host, on: window, enteredAt: now) }
         tracker(for: window).lastActive = now
         syncTabBar(of: window)
         let inset = leadingInset(for: window)
@@ -193,9 +193,12 @@ final class VerticalTabsManager: NSObject {
 
     /// Once a quick walk rests on `window` for the dwell time, only it stays
     /// kept in Recents (if it was selected from there); the rest settle back.
-    private func settleWalk(in host: VerticalTabsGroupHost, on window: TerminalWindow) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.recentsDwell) { [weak host, weak window] in
-            guard let host, let window, host.lastSelectedWindow === window else { return }
+    /// `entered` ties the check to this visit: an A→B→A walk's first timer
+    /// must not settle the second, shorter visit to A.
+    private func settleWalk(in host: VerticalTabsGroupHost, on window: TerminalWindow, enteredAt entered: Date) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.recentsDwell) { [weak self, weak host, weak window] in
+            guard let self, let host, let window, host.lastSelectedWindow === window,
+                  self.tracker(for: window).lastEntered == entered else { return }
             let id = ObjectIdentifier(window)
             let settled: Set<ObjectIdentifier> = host.keptRecents.contains(id) ? [id] : []
             guard settled != host.keptRecents else { return }
