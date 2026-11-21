@@ -14,11 +14,16 @@ struct LocalFileLink: Equatable {
     /// that do not exist, with or without a line suffix.
     init?(_ value: String, pwd: String?) {
         let path: String
+        var fragmentLine: (line: Int, column: Int?)?
         // Values such as "notes.md:12" parse with a "notes.md" scheme, so only
         // file URLs are decoded; everything else is tried as a path and web
         // URLs fall out because no such path exists.
         if let url = URL(string: value), url.scheme?.lowercased() == "file" {
-            guard url.query == nil, url.fragment == nil else { return nil }
+            guard url.query == nil else { return nil }
+            if let fragment = url.fragment {
+                guard let parsed = Self.lineFragment(fragment) else { return nil }
+                fragmentLine = parsed
+            }
             if let host = url.host, !host.isEmpty, host.caseInsensitiveCompare("localhost") != .orderedSame {
                 return nil
             }
@@ -29,7 +34,7 @@ struct LocalFileLink: Equatable {
         guard !path.isEmpty, !UntrustedURL.containsUnsafeCharacters(path) else { return nil }
 
         if let url = Self.existing(path, pwd: pwd) {
-            self.init(url: url, line: nil, column: nil)
+            self.init(url: url, line: fragmentLine?.line, column: fragmentLine?.column)
             return
         }
 
@@ -45,6 +50,14 @@ struct LocalFileLink: Equatable {
         self.url = url
         self.line = line
         self.column = column
+    }
+
+    /// GitHub-style line anchors: `L20`, `L20C5`, `L20-L27` (opens at the start).
+    private static func lineFragment(_ fragment: String) -> (line: Int, column: Int?)? {
+        guard let m = fragment.wholeMatch(of: #/L(\d+)(?:C(\d+))?(?:-L\d+(?:C\d+)?)?/#),
+              let line = Int(m.1)
+        else { return nil }
+        return (line, m.2.flatMap { Int($0) })
     }
 
     private static func existing(_ path: String, pwd: String?) -> URL? {
