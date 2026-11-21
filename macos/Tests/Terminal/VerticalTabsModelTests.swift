@@ -299,6 +299,28 @@ struct VerticalTabsModelTests {
         #expect(VerticalTabsSettings.TextSize.allCases.map(\.pointSize) == [12, 14, 16])
     }
 
+    @Test func metricsScaleWithFontSize() {
+        func metrics(_ size: CGFloat) -> VerticalTabsMetrics {
+            VerticalTabsMetrics(fontSize: size, secondarySize: max(9, size - 3.5))
+        }
+        let sizes: [CGFloat] = [12, 14, 16, 18]
+        let all = sizes.map(metrics)
+        #expect(all.map(\.minRowHeight) == [23, 27, 30, 34])
+        #expect(all.map(\.rowGap) == [2, 3, 3, 3])
+        #expect(all.map(\.rowPadding) == [7, 8, 9, 10])
+        #expect(all.map(\.itemSpacing) == [5, 6, 7, 8])
+        #expect(all.map(\.spacerMin) == [3, 4, 4, 5])
+        #expect(all.map(\.cornerRadius) == [6, 7, 8, 9])
+        #expect(all.map(\.pillHorizontalPadding) == [4, 5, 6, 7])
+        #expect(all.map(\.pillVerticalPadding) == [1, 1, 2, 2])
+        // With the rows' half gaps: ~0.55em above a header, ~0.2em below it.
+        #expect(all.map { $0.headerTop + $0.rowGap / 2 } == [7, 8, 9, 10])
+        #expect(all.map { $0.headerBottom + $0.rowGap / 2 } == [2, 3, 3, 4])
+        // Tiny sizes keep a visible gap and pill padding.
+        #expect(metrics(7).rowGap == 2)
+        #expect(metrics(7).pillVerticalPadding == 1)
+    }
+
     @Test func configPointSizes() {
         #expect(Ghostty.Config.pointSize(0, in: 8...32) == nil)
         #expect(Ghostty.Config.pointSize(-3, in: 8...32) == nil)

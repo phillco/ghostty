@@ -137,10 +137,9 @@ struct VerticalTabsSidebar: View {
         label()
             .font(.system(size: max(10, settings.secondaryFontSize), weight: .semibold))
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            // Rows add 1pt of their own: 8pt above (below a row), 3pt below.
-            .padding(.top, 7)
-            .padding(.bottom, 2)
+            .padding(.horizontal, metrics.rowPadding)
+            .padding(.top, metrics.headerTop)
+            .padding(.bottom, metrics.headerBottom)
     }
 
     private var recentsHeader: some View {
@@ -157,11 +156,14 @@ struct VerticalTabsSidebar: View {
         .buttonStyle(.plain)
     }
 
+    private var metrics: VerticalTabsMetrics {
+        VerticalTabsMetrics(fontSize: settings.fontSize, secondarySize: settings.secondaryFontSize)
+    }
+
     private var rowStyle: VerticalTabRowStyle {
         VerticalTabRowStyle(
             density: settings.density,
-            fontSize: settings.fontSize,
-            secondarySize: settings.secondaryFontSize,
+            metrics: metrics,
             pillMaxChars: settings.config.pillMaxChars,
             pillMaxWidth: settings.width * 0.4,
             showFolders: settings.showFolders,
@@ -254,11 +256,34 @@ struct VerticalTabsSidebar: View {
 
 // MARK: - Row
 
+/// Sidebar spacing in proportion to the text, like CSS `em`s, so every text
+/// size gets the same rhythm.
+struct VerticalTabsMetrics: Equatable {
+    let fontSize: CGFloat
+    let secondarySize: CGFloat
+
+    var minRowHeight: CGFloat { (fontSize * 1.9).rounded() }
+    /// Space between rows. Each row pads half of it, so the gap (and the drop
+    /// indicator drawn in it) stays inside a row's drop target.
+    var rowGap: CGFloat { max(2, (fontSize * 0.18).rounded()) }
+    var rowPadding: CGFloat { (fontSize * 0.55).rounded() }
+    var itemSpacing: CGFloat { (fontSize * 0.42).rounded() }
+    var spacerMin: CGFloat { max(3, (fontSize * 0.28).rounded()) }
+    var cornerRadius: CGFloat { (fontSize * 0.48).rounded() }
+    var pillHorizontalPadding: CGFloat { (secondarySize * 0.48).rounded() }
+    var pillVerticalPadding: CGFloat { max(1, (secondarySize * 0.14).rounded()) }
+    /// A section header's own padding; with the neighboring rows' half gaps the
+    /// header sits ~0.55em below the previous section and ~0.2em above its rows.
+    var headerTop: CGFloat { max(2, (fontSize * 0.55).rounded() - rowGap / 2) }
+    var headerBottom: CGFloat { max(1, (fontSize * 0.2).rounded() - rowGap / 2) }
+}
+
 /// How rows draw, from the View Options menu.
 private struct VerticalTabRowStyle: Equatable {
     let density: VerticalTabsSettings.Density
-    let fontSize: CGFloat
-    let secondarySize: CGFloat
+    let metrics: VerticalTabsMetrics
+    var fontSize: CGFloat { metrics.fontSize }
+    var secondarySize: CGFloat { metrics.secondarySize }
     let pillMaxChars: Int
     /// Keeps most of the row for the title at any font size or cap.
     let pillMaxWidth: CGFloat
@@ -267,7 +292,6 @@ private struct VerticalTabRowStyle: Equatable {
     let showShortcuts: Bool
     let showIcons: Bool
 
-    var minRowHeight: CGFloat { fontSize + 13 }
 }
 
 private struct VerticalTabRowView: View {
@@ -290,16 +314,16 @@ private struct VerticalTabRowView: View {
             case .tall: tall
             }
         }
-        .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity, minHeight: style.minRowHeight, alignment: .leading)
+        .padding(.horizontal, style.metrics.rowPadding)
+        .frame(maxWidth: .infinity, minHeight: style.metrics.minRowHeight, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
+            RoundedRectangle(cornerRadius: style.metrics.cornerRadius, style: .continuous)
                 .fill(Color.primary.opacity(row.isSelected ? 0.11 : hovering ? 0.05 : 0))
         )
         .overlay(alignment: dropAfter ? .bottom : .top) { dropIndicator }
-        // The 2pt gap between rows belongs to their drop targets, so dropping
-        // on the indicator line never lands outside a row.
-        .padding(.vertical, 1)
+        // The gap between rows belongs to their drop targets, so dropping on
+        // the indicator line never lands outside a row.
+        .padding(.vertical, style.metrics.rowGap / 2)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture {
@@ -323,17 +347,17 @@ private struct VerticalTabRowView: View {
             Capsule()
                 .fill(Color.accentColor)
                 .frame(height: 2)
-                // Into the row's 1pt gap padding, inside its own drop target.
-                .offset(y: dropAfter ? 1 : -1)
+                // Into the row's half of the gap, inside its own drop target.
+                .offset(y: (dropAfter ? 1 : -1) * style.metrics.rowGap / 2)
                 .allowsHitTesting(false)
         }
     }
 
     private var compact: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: style.metrics.itemSpacing) {
             if style.showIcons { glyph }
             title
-            Spacer(minLength: 4)
+            Spacer(minLength: style.metrics.spacerMin)
             if row.bell { bell }
             if let folder { FolderPill(folder: folder, style: style) }
             trailing
@@ -341,19 +365,19 @@ private struct VerticalTabRowView: View {
     }
 
     private var tall: some View {
-        HStack(alignment: .center, spacing: 6) {
+        HStack(alignment: .center, spacing: style.metrics.itemSpacing) {
             if style.showIcons { glyph }
             VStack(alignment: .leading, spacing: 2) {
                 title
                 if folder != nil || row.bell || age != nil {
-                    HStack(spacing: 4) {
+                    HStack(spacing: style.metrics.itemSpacing) {
                         if let folder { FolderPill(folder: folder, style: style) }
                         if row.bell { bell }
                         if let age { ageText(age) }
                     }
                 }
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: style.metrics.spacerMin)
             closeOrShortcut
         }
         .padding(.vertical, 2)
@@ -467,8 +491,8 @@ private struct FolderPill: View {
                 .font(.system(size: style.secondarySize, weight: .medium))
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
+                .padding(.horizontal, style.metrics.pillHorizontalPadding)
+                .padding(.vertical, style.metrics.pillVerticalPadding)
                 .foregroundStyle(Color(hue: hue, saturation: 0.35, brightness: 0.95))
                 .background(
                     Capsule().fill(Color(hue: hue, saturation: 0.5, brightness: 0.6).opacity(0.25))
