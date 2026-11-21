@@ -179,6 +179,7 @@ final class VerticalTabsManager: NSObject {
         let id = ObjectIdentifier(window)
         let kept: Set<ObjectIdentifier> = host.sections.recents.contains { $0.id == id } ? [id] : []
         host.keptRecents = dwelled ? kept : host.keptRecents.union(kept)
+        if !dwelled { settleWalk(in: host, on: window) }
         tracker(for: window).lastActive = now
         syncTabBar(of: window)
         let inset = leadingInset(for: window)
@@ -188,6 +189,19 @@ final class VerticalTabsManager: NSObject {
         // Rows first, then the move: the sidebar's first frame in this window
         // already shows this tab selected.
         host.refresh()
+    }
+
+    /// Once a quick walk rests on `window` for the dwell time, only it stays
+    /// kept in Recents (if it was selected from there); the rest settle back.
+    private func settleWalk(in host: VerticalTabsGroupHost, on window: TerminalWindow) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.recentsDwell) { [weak host, weak window] in
+            guard let host, let window, host.lastSelectedWindow === window else { return }
+            let id = ObjectIdentifier(window)
+            let settled: Set<ObjectIdentifier> = host.keptRecents.contains(id) ? [id] : []
+            guard settled != host.keptRecents else { return }
+            host.keptRecents = settled
+            host.refresh()
+        }
     }
 
     /// Lays out tabs that aren't on screen, one per runloop turn, so their
