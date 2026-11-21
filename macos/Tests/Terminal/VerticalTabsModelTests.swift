@@ -178,24 +178,54 @@ struct VerticalTabsModelTests {
         let sections = VerticalTabs.sections(tabs: tabs, pins: ["s4"], recentsLimit: 3)
         #expect(ids(sections.recents) == [id(1)])
 
-        #expect(sections.tab(forShortcut: 1)?.id == id(4))
-        #expect(sections.tab(forShortcut: 2)?.id == id(0))
-        #expect(sections.tab(forShortcut: 3)?.id == id(2))
-        #expect(sections.tab(forShortcut: 4)?.id == id(3))
+        #expect(sections.tab(for: .number(1))?.id == id(4))
+        #expect(sections.tab(for: .number(2))?.id == id(0))
+        #expect(sections.tab(for: .number(3))?.id == id(2))
+        #expect(sections.tab(for: .number(4))?.id == id(3))
         // Past the end selects the last numbered tab.
-        #expect(sections.tab(forShortcut: 9)?.id == id(3))
-        #expect(sections.tab(forShortcut: 0) == nil)
+        #expect(sections.tab(for: .number(9))?.id == id(3))
+        #expect(sections.tab(for: .number(0)) == nil)
 
         #expect(sections.shortcutNumber(for: id(4)) == 1)
         #expect(sections.shortcutNumber(for: id(1)) == nil)
         #expect(sections.shortcutNumber(for: id(3)) == 4)
     }
 
-    @Test func shortcutsStopAtNine() {
+    @Test func shortcutsMatchGhosttyDefaultsWithCmd9AsLastTab() {
+        // Ghostty binds Cmd+1..8 to goto_tab:1..8 and Cmd+9 to last_tab.
         let tabs = (0..<12).map { tab($0) }
-        let sections = VerticalTabs.sections(tabs: tabs, pins: [])
-        #expect(sections.shortcutNumber(for: id(8)) == 9)
-        #expect(sections.shortcutNumber(for: id(9)) == nil)
+        let sections = VerticalTabs.sections(tabs: tabs, pins: ["s11"])
+        // numbered: 11, 0, 1, ..., 10
+        #expect(sections.shortcutNumber(for: id(11)) == 1)
+        #expect(sections.shortcutNumber(for: id(6)) == 8)
+        #expect(sections.shortcutNumber(for: id(7)) == nil)
+        #expect(sections.shortcutNumber(for: id(10)) == 9)
+        #expect(sections.tab(for: .last)?.id == id(10))
+        #expect(sections.tab(for: .number(8))?.id == id(6))
+
+        // With exactly nine rows, the ninth row is both goto_tab:9 and last_tab.
+        let nine = VerticalTabs.sections(tabs: Array(tabs.prefix(9)), pins: [])
+        #expect(nine.shortcutNumber(for: id(8)) == 9)
+        #expect(nine.tab(for: .last)?.id == id(8))
+
+        // Fewer than nine: no 9 label, last_tab still picks the last row.
+        let three = VerticalTabs.sections(tabs: Array(tabs.prefix(3)), pins: [])
+        #expect(three.shortcutNumber(for: id(2)) == 3)
+        #expect(three.tab(for: .last)?.id == id(2))
+    }
+
+    @Test func pinnedFirstOrderRepairsDriftedNativeOrder() {
+        // A new tab opened next to pinned P1 lands between the pinned tabs.
+        let p1 = tab(0), new = tab(1), p2 = tab(2), open = tab(3)
+        let drifted = [p1, new, p2, open]
+        #expect(VerticalTabs.pinnedFirstOrder(tabs: drifted, pins: ["s0", "s2"]) == [id(0), id(2), id(1), id(3)])
+
+        // Already pinned-first (in pin order): nothing to do.
+        #expect(VerticalTabs.pinnedFirstOrder(tabs: [p1, p2, new, open], pins: ["s0", "s2"]) == nil)
+        #expect(VerticalTabs.pinnedFirstOrder(tabs: drifted, pins: []) == nil)
+
+        // Pin order wins over native order among pinned tabs.
+        #expect(VerticalTabs.pinnedFirstOrder(tabs: [p1, p2, new], pins: ["s2", "s0"]) == [id(2), id(0), id(1)])
     }
 
     @Test func groupOrderPutsPinnedFirst() {

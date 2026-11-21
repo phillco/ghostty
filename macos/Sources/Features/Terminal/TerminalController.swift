@@ -1275,7 +1275,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // without waiting for @FocusedValue to propagate through the
         // SwiftUI focus chain.
         container.initialContentSize = focusedSurface?.initialSize
-        container.leadingInset = VerticalTabsManager.shared.leadingInset
+        container.leadingInset = VerticalTabsManager.shared.leadingInset(for: window)
 
         window.contentView = container
 
@@ -1816,6 +1816,16 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // This will be the index we want to actual go to
         let finalIndex: Int
 
+        // Vertical tabs number Pinned then Open rows, skipping Recents.
+        let verticalShortcut: VerticalTabs.Shortcut? = tabIndex >= 1
+            ? .number(Int(tabIndex))
+            : (tabIndex == GHOSTTY_GOTO_TAB_LAST.rawValue ? .last : nil)
+        if let verticalShortcut,
+           let target = VerticalTabsManager.shared.window(for: verticalShortcut, in: tabGroup) {
+            target.makeKeyAndOrderFront(nil)
+            return
+        }
+
         // An index that is invalid is used to signal some special values.
         if tabIndex <= 0 {
             guard let selectedWindow = tabGroup.selectedWindow else { return }
@@ -1841,12 +1851,6 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         } else {
             // The configured value is 1-indexed.
             guard tabIndex >= 1 else { return }
-
-            // Vertical tabs number Pinned then Open rows, skipping Recents.
-            if let target = VerticalTabsManager.shared.window(forShortcut: Int(tabIndex), in: tabGroup) {
-                target.makeKeyAndOrderFront(nil)
-                return
-            }
 
             // If our index is outside our boundary then we use the max
             finalIndex = min(Int(tabIndex - 1), tabbedWindows.count - 1)

@@ -23,8 +23,11 @@ final class VerticalTabsManager: NSObject {
 
     var isEnabled: Bool { settings.enabled }
 
-    /// The leading inset every terminal container should use right now.
-    var leadingInset: CGFloat { isEnabled ? settings.width : 0 }
+    /// The leading inset a terminal container should use right now. Windows that
+    /// can't tab (hidden titlebar) never get a sidebar, so they get no gutter.
+    func leadingInset(for window: NSWindow) -> CGFloat {
+        isEnabled && window.tabbingMode != .disallowed ? settings.width : 0
+    }
 
     // MARK: Lifecycle
 
@@ -73,7 +76,7 @@ final class VerticalTabsManager: NSObject {
 
     private func applyEnabled() {
         for window in terminalWindows {
-            window.terminalViewContainerForVerticalTabs?.leadingInset = leadingInset
+            window.terminalViewContainerForVerticalTabs?.leadingInset = leadingInset(for: window)
             syncTabBar(of: window)
         }
 
@@ -91,6 +94,13 @@ final class VerticalTabsManager: NSObject {
             hosts = [:]
             trackers.values.forEach { $0.removeBackdrop() }
             trackers = [:]
+
+            // The filter or rename field may have had focus; give it back to the terminal.
+            for window in terminalWindows where !(window.firstResponder is Ghostty.SurfaceView) {
+                if let surface = window.terminalController?.focusedSurface {
+                    window.makeFirstResponder(surface)
+                }
+            }
         }
     }
 
@@ -103,12 +113,12 @@ final class VerticalTabsManager: NSObject {
         }
     }
 
-    /// `Cmd+1..9` in vertical mode: Pinned then Open, skipping Recents.
-    func window(forShortcut number: Int, in tabGroup: NSWindowTabGroup) -> NSWindow? {
+    /// `goto_tab:N` / `last_tab` in vertical mode: Pinned then Open, skipping Recents.
+    func window(for shortcut: VerticalTabs.Shortcut, in tabGroup: NSWindowTabGroup) -> NSWindow? {
         guard isEnabled else { return nil }
         let host = host(for: tabGroup)
         host.refresh()
-        return host.window(forShortcut: number)
+        return host.window(for: shortcut)
     }
 
     // MARK: Windows
@@ -118,12 +128,13 @@ final class VerticalTabsManager: NSObject {
     }
 
     private func windowDidBecomeMain(_ window: TerminalWindow) {
-        guard isEnabled, let tabGroup = window.tabGroup else { return }
+        guard isEnabled, window.tabbingMode != .disallowed, let tabGroup = window.tabGroup else { return }
         tracker(for: window).lastFocused = Date()
         tracker(for: window).lastActive = Date()
         syncTabBar(of: window)
-        if window.terminalViewContainerForVerticalTabs?.leadingInset != leadingInset {
-            window.terminalViewContainerForVerticalTabs?.leadingInset = leadingInset
+        let inset = leadingInset(for: window)
+        if window.terminalViewContainerForVerticalTabs?.leadingInset != inset {
+            window.terminalViewContainerForVerticalTabs?.leadingInset = inset
         }
         let host = host(for: tabGroup)
         host.attach(to: window)
@@ -142,7 +153,7 @@ final class VerticalTabsManager: NSObject {
         guard isEnabled else { return }
 
         // Make sure every group with a visible window has a host.
-        for window in terminalWindows {
+        for window in terminalWindows where window.tabbingMode != .disallowed {
             guard let tabGroup = window.tabGroup, tabGroup.selectedWindow === window else { continue }
             _ = host(for: tabGroup)
         }
@@ -185,7 +196,7 @@ final class VerticalTabsManager: NSObject {
         settings.width = VerticalTabsSettings.clamp(width)
         hosts.values.forEach { $0.setSidebarWidth(settings.width) }
         for window in terminalWindows {
-            window.terminalViewContainerForVerticalTabs?.leadingInset = leadingInset
+            window.terminalViewContainerForVerticalTabs?.leadingInset = leadingInset(for: window)
         }
         refreshAll()
     }

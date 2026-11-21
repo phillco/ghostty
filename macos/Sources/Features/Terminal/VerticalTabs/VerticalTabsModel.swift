@@ -114,6 +114,12 @@ enum VerticalTabs {
         var pinKey: String? { surfaceIDs.first }
     }
 
+    /// A goto_tab target: `goto_tab:N` or `last_tab`.
+    enum Shortcut: Equatable {
+        case number(Int)
+        case last
+    }
+
     struct Sections: Equatable {
         var pinned: [Tab] = []
         var recents: [Tab] = []
@@ -122,19 +128,30 @@ enum VerticalTabs {
         /// The rows `Cmd+1..9` address: Pinned then Open, skipping Recents.
         var numbered: [Tab] { pinned + open }
 
-        /// The 1-based shortcut number for a tab, if it has one (1...9).
+        /// The shortcut label for a tab, following Ghostty's default bindings:
+        /// `Cmd+1..8` are `goto_tab:1..8` and `Cmd+9` is `last_tab`. So the first
+        /// eight numbered rows show 1–8, and the last numbered row shows 9 once
+        /// there are at least nine.
         func shortcutNumber(for id: ObjectIdentifier) -> Int? {
-            guard let index = numbered.prefix(9).firstIndex(where: { $0.id == id }) else { return nil }
-            return index + 1
+            let list = numbered
+            guard let index = list.firstIndex(where: { $0.id == id }) else { return nil }
+            if index < 8 { return index + 1 }
+            if index == list.count - 1 { return 9 }
+            return nil
         }
 
-        /// The tab `goto_tab:n` (1-based) selects. Indices past the end pick the last
+        /// The tab a goto_tab shortcut selects. Numbers past the end pick the last
         /// numbered tab, matching Ghostty's horizontal behavior.
-        func tab(forShortcut n: Int) -> Tab? {
-            guard n >= 1 else { return nil }
+        func tab(for shortcut: Shortcut) -> Tab? {
             let list = numbered
             guard !list.isEmpty else { return nil }
-            return list[min(n - 1, list.count - 1)]
+            switch shortcut {
+            case .last:
+                return list.last
+            case .number(let n):
+                guard n >= 1 else { return nil }
+                return list[min(n - 1, list.count - 1)]
+            }
         }
     }
 
@@ -196,6 +213,14 @@ enum VerticalTabs {
         let pinned = sections(tabs: tabs, pins: pins, recentsLimit: 0).pinned.map(\.id)
         let pinnedSet = Set(pinned)
         return pinned + tabs.map(\.id).filter { !pinnedSet.contains($0) }
+    }
+
+    /// The tab group order to restore when the native order no longer puts
+    /// pinned tabs first (a new tab opened next to a pinned one, a merge, a
+    /// restore), or nil when it already matches.
+    static func pinnedFirstOrder(tabs: [Tab], pins: [String]) -> [ObjectIdentifier]? {
+        let order = groupOrder(tabs: tabs, pins: pins)
+        return order == tabs.map(\.id) ? nil : order
     }
 
     // MARK: Pins

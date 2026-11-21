@@ -44,9 +44,12 @@ final class VerticalTabsGroupHost {
 
     let store = VerticalTabsStore()
     private let hostingView: NSView
-    private var widthConstraint: NSLayoutConstraint?
+    /// Owned by the hosting view itself, so it survives reparenting: create once.
+    private let widthConstraint: NSLayoutConstraint
     private var windowsObservation: NSKeyValueObservation?
     private var refreshScheduled = false
+    /// Set while we reorder the tab group, so the windows KVO doesn't re-enter.
+    private var isReordering = false
 
     /// The latest snapshot, in tab group order.
     private(set) var tabs: [VerticalTabs.Tab] = []
@@ -63,6 +66,8 @@ final class VerticalTabsGroupHost {
         view.sizingOptions = []
         view.translatesAutoresizingMaskIntoConstraints = false
         hostingView = view
+        widthConstraint = view.widthAnchor.constraint(equalToConstant: manager.settings.width)
+        widthConstraint.isActive = true
         store.host = self
 
         windowsObservation = tabGroup.observe(\.windows, options: [.new]) { [weak self] _, _ in
@@ -84,18 +89,16 @@ final class VerticalTabsGroupHost {
         guard hostingView.superview !== container else { return }
         hostingView.removeFromSuperview()
         container.addSubview(hostingView)
-        let width = hostingView.widthAnchor.constraint(equalToConstant: manager.settings.width)
+        widthConstraint.constant = manager.settings.width
         NSLayoutConstraint.activate([
             hostingView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             hostingView.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
             hostingView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            width,
         ])
-        widthConstraint = width
     }
 
     func setSidebarWidth(_ width: CGFloat) {
-        widthConstraint?.constant = width
+        widthConstraint.constant = width
     }
 
     // MARK: Refresh
@@ -110,7 +113,10 @@ final class VerticalTabsGroupHost {
         }
     }
 
-    func refresh() {
+    /// - Parameter enforceOrder: restore the pinned-first native order if it
+    ///   drifted. The follow-up refresh after a reorder passes false so a reorder
+    ///   AppKit refuses can't recurse.
+    func refresh(enforceOrder: Bool = true) {
         guard let tabGroup else { return }
         let windows = tabGroup.windows.compactMap { $0 as? TerminalWindow }
         let selected = tabGroup.selectedWindow
@@ -145,6 +151,11 @@ final class VerticalTabsGroupHost {
         updatePinKeys()
 
         let pins = manager.settings.pins.keys
+        if enforceOrder, !isReordering, let order = VerticalTabs.pinnedFirstOrder(tabs: tabs, pins: pins) {
+            reorderTabGroup(to: order)
+            refresh(enforceOrder: false)
+            return
+        }
         // Collapsed Recents must not hide tabs: they stay in Open instead.
         let collapsed = manager.settings.recentsCollapsed
         sections = VerticalTabs.sections(
@@ -199,8 +210,8 @@ final class VerticalTabsGroupHost {
         manager.settings.markSeen(matches.map(\.key))
     }
 
-    func window(forShortcut number: Int) -> NSWindow? {
-        guard let tab = sections.tab(forShortcut: number) else { return nil }
+    func window(for shortcut: VerticalTabs.Shortcut) -> NSWindow? {
+        guard let tab = sections.tab(for: shortcut) else { return nil }
         return windowsByID[tab.id]
     }
 
@@ -314,6 +325,8 @@ final class VerticalTabsGroupHost {
         guard desired.count == tabGroup.windows.count,
               tabGroup.windows.map(ObjectIdentifier.init) != order else { return }
         let selected = tabGroup.selectedWindow
+        isReordering = true
+        defer { isReordering = false }
 
         NSAnimationContext.beginGrouping()
         NSAnimationContext.current.duration = 0
