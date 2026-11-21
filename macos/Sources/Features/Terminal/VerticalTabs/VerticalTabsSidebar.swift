@@ -106,7 +106,7 @@ struct VerticalTabsSidebar: View {
 
     private var stack: some View {
         ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 0) {
                 if isFiltering {
                     rows(store.filteredRows, section: nil, move: nil)
                 } else {
@@ -138,9 +138,9 @@ struct VerticalTabsSidebar: View {
             .font(.system(size: max(10, settings.secondaryFontSize), weight: .semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6)
-            // With the stack's 2pt spacing: 8pt above (below a row), 3pt below.
-            .padding(.top, 6)
-            .padding(.bottom, 1)
+            // Rows add 1pt of their own: 8pt above (below a row), 3pt below.
+            .padding(.top, 7)
+            .padding(.bottom, 2)
     }
 
     private var recentsHeader: some View {
@@ -297,6 +297,9 @@ private struct VerticalTabRowView: View {
                 .fill(Color.primary.opacity(row.isSelected ? 0.11 : hovering ? 0.05 : 0))
         )
         .overlay(alignment: dropAfter ? .bottom : .top) { dropIndicator }
+        // The 2pt gap between rows belongs to their drop targets, so dropping
+        // on the indicator line never lands outside a row.
+        .padding(.vertical, 1)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture {
@@ -320,8 +323,8 @@ private struct VerticalTabRowView: View {
             Capsule()
                 .fill(Color.accentColor)
                 .frame(height: 2)
-                // Centered in the stack's 2pt gap between rows.
-                .offset(y: dropAfter ? 2 : -2)
+                // Into the row's 1pt gap padding, inside its own drop target.
+                .offset(y: dropAfter ? 1 : -1)
                 .allowsHitTesting(false)
         }
     }
