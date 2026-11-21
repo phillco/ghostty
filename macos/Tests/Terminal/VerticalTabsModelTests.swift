@@ -220,6 +220,29 @@ struct VerticalTabsModelTests {
         #expect(match([term], [session(300, "h", host: 400)], processes: ag) == "h")
     }
 
+    @Test func ownerBornAfterTheFileWasWrittenNeverMatches() {
+        let term = VerticalTabs.TerminalKey(device: 8, foregroundPID: 300)
+        var written = session(300, "a")
+        written.fileMtime = 1_000
+        func proc(started: Double?) -> [Int32: VerticalTabs.ProcessSnapshot] {
+            [300: .init(name: "ag", tty: 8, startTime: started)]
+        }
+        // Born before the write (a prespawned spare), or within the slack: the writer.
+        #expect(match([term], [written], processes: proc(started: 500)) == "a")
+        #expect(match([term], [written], processes: proc(started: 1_002)) == "a")
+        // Born after the write: a reused PID.
+        #expect(match([term], [written], processes: proc(started: 1_002.5)) == nil)
+        // Unknown times don't reject.
+        #expect(match([term], [written], processes: proc(started: nil)) == "a")
+        #expect(match([term], [session(300, "b")], processes: proc(started: 9_999)) == "b")
+        // The ag-host process is checked too.
+        var hosted = session(300, "h", host: 400)
+        hosted.fileMtime = 1_000
+        var processes = proc(started: 900)
+        processes[400] = .init(name: "ag", tty: nil, startTime: 1_100)
+        #expect(match([term], [hosted], processes: processes) == nil)
+    }
+
     @Test func parsedSessionsCarryValidation() throws {
         let claude = try #require(VerticalTabs.claudeSession(json: Data(
             #"{"pid":5,"sessionId":"edfb2ff9","messagingSocketPath":"/tmp/cc-socks/5.sock"}"#.utf8)))

@@ -15,6 +15,12 @@ extension VerticalTabs {
         var socketPath: String?
         /// A host process that must still be alive, with one of `processNames`.
         var hostPID: Int32?
+        /// When the discovery file was last written (seconds since 1970). A
+        /// process started after that can't have written it: its PID was reused.
+        var fileMtime: Double?
+
+        /// Slack for the coarse start time and a write racing the spawn.
+        static let startTimeSlack: Double = 2
 
         /// What Copy ID puts on the pasteboard.
         var copyText: String { "\(sessionId) (\(peerId))" }
@@ -138,6 +144,8 @@ extension VerticalTabs {
         let name: String
         /// Controlling terminal device, if any.
         let tty: UInt32?
+        /// Process start time (seconds since 1970).
+        var startTime: Double?
     }
 
     /// A terminal to match: its TTY device and foreground process.
@@ -150,7 +158,7 @@ extension VerticalTabs {
     /// any live candidate matches. A candidate matches a terminal when one of its
     /// PIDs is a live process with an expected name that is the terminal's
     /// foreground process (preferred) or on its TTY. Stale files (gone socket,
-    /// dead host, reused PID) never match.
+    /// dead host, reused PID, owner born after the file was written) never match.
     static func matchSession(
         terminals: [TerminalKey],
         candidates: [AgentSession],
@@ -159,6 +167,8 @@ extension VerticalTabs {
     ) -> AgentSession? {
         func owner(_ pid: Int32, of session: AgentSession) -> ProcessSnapshot? {
             guard let snapshot = process(pid), session.processNames.contains(snapshot.name) else { return nil }
+            if let start = snapshot.startTime, let mtime = session.fileMtime,
+               start > mtime + AgentSession.startTimeSlack { return nil }
             return snapshot
         }
         let live = candidates.filter { session in
@@ -205,23 +215,33 @@ enum VerticalTabsAgentLookup {
     /// Claude's own session files first, so Claude tabs get their registered name.
     private static func candidates() -> [VerticalTabs.AgentSession] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return files(in: home + "/.claude/sessions", prefix: "", suffix: ".json")
-            .compactMap(VerticalTabs.claudeSession)
-            + files(in: "/tmp", prefix: "claude-clarc-", suffix: ".ready").compactMap { VerticalTabs.clarcSession(json: $0) }
-            + files(in: "/tmp", prefix: "ag-host-", suffix: ".json").compactMap { VerticalTabs.agHostSession(json: $0) }
+        return sessions(in: home + "/.claude/sessions", prefix: "", suffix: ".json") { VerticalTabs.claudeSession(json: $0) }
+            + sessions(in: "/tmp", prefix: "claude-clarc-", suffix: ".ready") { VerticalTabs.clarcSession(json: $0) }
+            + sessions(in: "/tmp", prefix: "ag-host-", suffix: ".json") { VerticalTabs.agHostSession(json: $0) }
+    }
+
+    private static func sessions(
+        in dir: String, prefix: String, suffix: String, parse: (Data) -> VerticalTabs.AgentSession?
+    ) -> [VerticalTabs.AgentSession] {
+        files(in: dir, prefix: prefix, suffix: suffix).compactMap { file in
+            guard var session = parse(file.data) else { return nil }
+            session.fileMtime = file.mtime
+            return session
+        }
     }
 
     /// Regular files we own only: `/tmp` is shared, and a symlink or another
     /// user's file must not supply a session identity.
-    private static func files(in dir: String, prefix: String, suffix: String) -> [Data] {
+    private static func files(in dir: String, prefix: String, suffix: String) -> [(data: Data, mtime: Double?)] {
         let fm = FileManager.default
         let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
         return names.filter { $0.hasPrefix(prefix) && $0.hasSuffix(suffix) }.compactMap { name in
             let path = dir + "/" + name
             guard let attrs = try? fm.attributesOfItem(atPath: path),
                   attrs[.type] as? FileAttributeType == .typeRegular,
-                  (attrs[.ownerAccountID] as? NSNumber)?.uint32Value == getuid() else { return nil }
-            return fm.contents(atPath: path)
+                  (attrs[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
+                  let data = fm.contents(atPath: path) else { return nil }
+            return (data, (attrs[.modificationDate] as? Date)?.timeIntervalSince1970)
         }
     }
 
@@ -238,6 +258,7 @@ enum VerticalTabsAgentLookup {
         guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
         let name = withUnsafeBytes(of: info.pbi_comm) { String(bytes: $0.prefix { $0 != 0 }, encoding: .utf8) } ?? ""
         // NODEV (-1) means no controlling terminal.
-        return .init(name: name, tty: info.e_tdev == UInt32.max ? nil : info.e_tdev)
+        let start = Double(info.pbi_start_tvsec) + Double(info.pbi_start_tvusec) / 1_000_000
+        return .init(name: name, tty: info.e_tdev == UInt32.max ? nil : info.e_tdev, startTime: start)
     }
 }
