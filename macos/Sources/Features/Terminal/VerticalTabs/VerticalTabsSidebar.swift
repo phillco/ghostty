@@ -67,6 +67,7 @@ struct VerticalTabsSidebar: View {
             Toggle("Idle Time", isOn: $settings.showIdleTime)
             Toggle("Shortcuts", isOn: $settings.showShortcuts)
             Toggle("Icons", isOn: $settings.showIcons)
+            Toggle("Recents", isOn: $settings.showRecents)
         } label: {
             Image(systemName: "slider.horizontal.3")
         }

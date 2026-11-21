@@ -40,6 +40,7 @@ final class VerticalTabsSettings: ObservableObject {
         static let showIdleTime = "VerticalTabsShowIdleTime"
         static let showShortcuts = "VerticalTabsShowShortcuts"
         static let showIcons = "VerticalTabsShowIcons"
+        static let showRecents = "VerticalTabsShowRecents"
         static let recentsCollapsed = "VerticalTabsRecentsCollapsed"
         static let pins = "VerticalTabsPins"
         static let pinsSeen = "VerticalTabsPinsSeen"
@@ -81,6 +82,11 @@ final class VerticalTabsSettings: ObservableObject {
         didSet { defaults.set(showIcons, forKey: Key.showIcons) }
     }
 
+    /// The Recents section; when off its tabs stay in Open.
+    @Published var showRecents: Bool {
+        didSet { defaults.set(showRecents, forKey: Key.showRecents) }
+    }
+
     @Published var recentsCollapsed: Bool {
         didSet { defaults.set(recentsCollapsed, forKey: Key.recentsCollapsed) }
     }
@@ -107,6 +113,7 @@ final class VerticalTabsSettings: ObservableObject {
         showIdleTime = defaults.object(forKey: Key.showIdleTime) as? Bool ?? true
         showShortcuts = defaults.object(forKey: Key.showShortcuts) as? Bool ?? true
         showIcons = defaults.object(forKey: Key.showIcons) as? Bool ?? true
+        showRecents = defaults.object(forKey: Key.showRecents) as? Bool ?? true
         recentsCollapsed = defaults.bool(forKey: Key.recentsCollapsed)
         let seen = defaults.dictionary(forKey: Key.pinsSeen) as? [String: Double] ?? [:]
 

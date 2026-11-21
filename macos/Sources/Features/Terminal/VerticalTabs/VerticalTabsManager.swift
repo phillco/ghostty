@@ -18,7 +18,7 @@ final class VerticalTabsManager: NSObject {
     private var trackers: [ObjectIdentifier: WindowTracker] = [:]
     private var observers: [NSObjectProtocol] = []
     private var ageTimer: Timer?
-    private var recentsCollapsedCancellable: AnyCancellable?
+    private var recentsCancellable: AnyCancellable?
     private var started = false
 
     var isEnabled: Bool { settings.enabled }
@@ -60,10 +60,10 @@ final class VerticalTabsManager: NSObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(250)) { self?.refreshAll() }
         })
 
-        // Collapsing Recents moves its tabs back into Open (and renumbers them).
-        recentsCollapsedCancellable = settings.$recentsCollapsed
+        // Collapsing or hiding Recents moves its tabs back into Open (and renumbers them).
+        recentsCancellable = settings.$recentsCollapsed.combineLatest(settings.$showRecents)
             .dropFirst()
-            .removeDuplicates()
+            .removeDuplicates { $0 == $1 }
             .sink { [weak self] _ in DispatchQueue.main.async { self?.refreshAll() } }
 
         if isEnabled { applyEnabled() }
@@ -129,14 +129,19 @@ final class VerticalTabsManager: NSObject {
 
     private func windowDidBecomeMain(_ window: TerminalWindow) {
         guard isEnabled, window.tabbingMode != .disallowed, let tabGroup = window.tabGroup else { return }
-        tracker(for: window).lastFocused = Date()
-        tracker(for: window).lastActive = Date()
+        let host = host(for: tabGroup)
+        let now = Date()
+        // The tab switched away from enters Recents; the newly selected one stays put.
+        if let previous = host.lastSelectedWindow, previous !== window, previous.tabGroup === tabGroup {
+            tracker(for: previous).lastLeft = now
+        }
+        host.lastSelectedWindow = window
+        tracker(for: window).lastActive = now
         syncTabBar(of: window)
         let inset = leadingInset(for: window)
         if window.terminalViewContainerForVerticalTabs?.leadingInset != inset {
             window.terminalViewContainerForVerticalTabs?.leadingInset = inset
         }
-        let host = host(for: tabGroup)
         host.attach(to: window)
         host.refresh()
     }
@@ -285,10 +290,13 @@ extension VerticalTabsManager: NSMenuItemValidation {
 /// Per-window bookkeeping: focus and activity times plus cheap observers that
 /// schedule a (throttled) sidebar refresh.
 final class WindowTracker {
-    var lastFocused: Date?
+    /// When another tab in the group was selected over this one; ranks Recents.
+    var lastLeft: Date?
     var lastActive: Date?
     /// The pin key this tab matched on the last refresh.
     var claimedPinKey: String?
+    /// The agent platform seen last, kept across ambiguous spinner frames.
+    var lastPlatform: VerticalTabs.Platform?
 
     private var titleObservation: NSKeyValueObservation?
     private var bellCancellable: AnyCancellable?

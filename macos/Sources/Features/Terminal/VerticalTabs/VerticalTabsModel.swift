@@ -16,29 +16,36 @@ enum VerticalTabs {
     /// A tab title with spinner and agent glyph prefixes removed.
     struct ParsedTitle: Equatable {
         let text: String
-        let platform: Platform
+        /// `nil` when only an ambiguous spinner glyph was present.
+        let platform: Platform?
     }
 
-    /// Leading glyphs `ag` puts in titles: every preset's idle glyph and spinner
-    /// frames (`~/bin/go/ag/config.go` `titlePresets`).
+    /// Leading glyphs only `ag` puts in titles: its preset idle glyphs and
+    /// spinner frames (`~/bin/go/ag/config.go` `titlePresets`), minus the moon
+    /// frames, which Claude Code also uses.
     static let agyGlyphs: Set<Unicode.Scalar> = [
-        "✦", "✧", "◜", "◝", "◞", "◟", "◠", "◡", "◐", "◓", "◑", "◒",
+        "✦", "✧", "◜", "◝", "◞", "◟", "◠", "◡",
         "◴", "◷", "◶", "◵", "◉", "◌", "◎", "◈", "◇", "◆", "◢", "◣", "◤", "◥",
     ]
 
-    /// Strips leading whitespace, Braille spinner characters (U+2800–U+28FF),
-    /// Ghostty's bell prefix and a leading agent glyph from a tab title.
-    /// Claude Code shows `✳` when idle and only a Braille spinner while busy, so
-    /// a non-blank Braille prefix without an `ag` glyph also means Claude.
+    /// Spinner frames both `ag` (moon preset) and Claude Code use.
+    static let ambiguousSpinnerGlyphs: Set<Unicode.Scalar> = ["◐", "◑", "◒", "◓"]
+
+    /// Strips leading whitespace, spinner characters, Ghostty's bell prefix and
+    /// a leading agent glyph from a tab title.
+    ///
+    /// The platform is `nil` for an ambiguous moon spinner (`◐◑◒◓`); see
+    /// `resolvePlatform`. Claude Code shows `✳` when idle and a Braille spinner
+    /// while busy, so a non-blank Braille prefix without an `ag` glyph is Claude.
     static func parseTitle(_ raw: String) -> ParsedTitle {
         var scalars = Substring(raw).unicodeScalars[...]
-        var platform: Platform = .terminal
-        var sawSpinner = false
+        var platform: Platform? = .terminal
+        var sawBraille = false
 
         func dropNoise() {
             while let first = scalars.first {
                 if (0x2801...0x28FF).contains(first.value) {
-                    sawSpinner = true
+                    sawBraille = true
                     scalars.removeFirst()
                 } else if first.properties.isWhitespace || first == "\u{2800}" ||
                     first == "\u{FE0F}" || first == "🔔" {
@@ -57,14 +64,31 @@ enum VerticalTabs {
             } else if first == "✳" {
                 platform = .claude
                 scalars.removeFirst()
+            } else if ambiguousSpinnerGlyphs.contains(first) {
+                platform = nil
+                scalars.removeFirst()
             }
         }
         dropNoise()
-        if platform == .terminal, sawSpinner { platform = .claude }
+        if platform != .agy, platform != .claude, sawBraille { platform = .claude }
 
         let text = String(String.UnicodeScalarView(scalars))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return .init(text: text, platform: platform)
+    }
+
+    /// The platform to show for a parsed title, and the agent platform to
+    /// remember for the next title. An ambiguous spinner keeps the remembered
+    /// platform (Claude if none), so busy tabs don't flip icons; a plain title
+    /// (back at the shell) forgets it.
+    static func resolvePlatform(
+        _ parsed: Platform?, last: Platform?
+    ) -> (shown: Platform, last: Platform?) {
+        switch parsed {
+        case nil: return (last ?? .claude, last)
+        case .terminal?: return (.terminal, nil)
+        case let platform?: return (platform, platform)
+        }
     }
 
     /// A folder name shortened for its pill, so long repo names don't starve the title.
@@ -119,7 +143,8 @@ enum VerticalTabs {
         var platform: Platform = .terminal
         var bell: Bool = false
         var isSelected: Bool = false
-        var lastFocused: Date?
+        /// When another tab in the group was last selected over this one.
+        var lastLeft: Date?
         /// Last focus or title change; drives the idle age.
         var lastActive: Date?
         /// The pin key this tab matched last time, if any. A claimed key keeps
@@ -175,7 +200,9 @@ enum VerticalTabs {
     /// Splits tabs into Pinned / Recents / Open so no tab appears twice.
     ///
     /// - Pinned follows `pins` order.
-    /// - Recents are the most recently focused unpinned tabs, excluding the selected tab.
+    /// - Recents are the unpinned tabs most recently switched away from. Ranking
+    ///   by when a tab was left, not focused, keeps a tab selected from Recents
+    ///   in Recents and one selected from Open in Open.
     /// - Open keeps tab group order for everything else.
     static func sections(tabs: [Tab], pins: [String], recentsLimit: Int = recentsLimit) -> Sections {
         var result = Sections()
@@ -189,8 +216,8 @@ enum VerticalTabs {
 
         if recentsLimit > 0 {
             result.recents = tabs
-                .filter { !used.contains($0.id) && !$0.isSelected && $0.lastFocused != nil }
-                .sorted { $0.lastFocused! > $1.lastFocused! }
+                .filter { !used.contains($0.id) && $0.lastLeft != nil }
+                .sorted { $0.lastLeft! > $1.lastLeft! }
                 .prefix(recentsLimit)
                 .map { $0 }
             used.formUnion(result.recents.map(\.id))

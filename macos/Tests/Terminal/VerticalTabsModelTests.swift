@@ -13,7 +13,7 @@ struct VerticalTabsModelTests {
         title: String = "",
         folder: String? = nil,
         selected: Bool = false,
-        focused: TimeInterval? = nil,
+        left: TimeInterval? = nil,
         surfaces: [String]? = nil
     ) -> VerticalTabs.Tab {
         VerticalTabs.Tab(
@@ -22,7 +22,7 @@ struct VerticalTabsModelTests {
             title: title.isEmpty ? "tab \(index)" : title,
             folder: folder,
             isSelected: selected,
-            lastFocused: focused.map { Date(timeIntervalSince1970: $0) }
+            lastLeft: left.map { Date(timeIntervalSince1970: $0) }
         )
     }
 
@@ -42,16 +42,19 @@ struct VerticalTabsModelTests {
         ("  ✳  spaced  ", "spaced", .claude),
         ("a ✳ in the middle", "a ✳ in the middle", .terminal),
         ("✧ Text Read", "Text Read", .agy),
-        ("◐ Clarc-observer", "Clarc-observer", .agy),
+        ("◐ Clarc-observer", "Clarc-observer", nil),
+        ("◓ moon frame", "moon frame", nil),
+        ("🔔 ◑ ambiguous", "ambiguous", nil),
+        ("⠋ ◒ Busy Claude", "Busy Claude", .claude),
         ("◥ tri frame", "tri frame", .agy),
         ("◉ halo idle", "halo idle", .agy),
         ("⠂ Busy Claude", "Busy Claude", .claude),
         ("⠐⠂ Busy Claude", "Busy Claude", .claude),
         ("🔔 ⠋ Busy Claude", "Busy Claude", .claude),
         ("⠋ 🔔 ✧ Busy agy", "Busy agy", .agy),
-        ("🔔 ◐ Needs input", "Needs input", .agy),
+        ("🔔 ◜ Needs input", "Needs input", .agy),
     ])
-    func parsesTitles(raw: String, text: String, platform: VerticalTabs.Platform) {
+    func parsesTitles(raw: String, text: String, platform: VerticalTabs.Platform?) {
         let parsed = VerticalTabs.parseTitle(raw)
         #expect(parsed.text == text)
         #expect(parsed.platform == platform)
@@ -61,7 +64,24 @@ struct VerticalTabsModelTests {
         for glyph in VerticalTabs.agyGlyphs {
             #expect(VerticalTabs.parseTitle("\(glyph) t") == .init(text: "t", platform: .agy))
         }
-        #expect(VerticalTabs.agyGlyphs.count == 26)
+        #expect(VerticalTabs.agyGlyphs.count == 22)
+        #expect(VerticalTabs.agyGlyphs.isDisjoint(with: VerticalTabs.ambiguousSpinnerGlyphs))
+    }
+
+    @Test func ambiguousSpinnerKeepsLastPlatform() {
+        func resolve(_ titles: [String]) -> [VerticalTabs.Platform] {
+            var last: VerticalTabs.Platform?
+            return titles.map { title in
+                let resolved = VerticalTabs.resolvePlatform(VerticalTabs.parseTitle(title).platform, last: last)
+                last = resolved.last
+                return resolved.shown
+            }
+        }
+        #expect(resolve(["✦ idle", "◐ busy", "◓ busy", "✦ idle"]) == [.agy, .agy, .agy, .agy])
+        #expect(resolve(["✳ idle", "◐ busy", "⠋ busy", "◑ busy"]) == [.claude, .claude, .claude, .claude])
+        // No history defaults to Claude; a plain title forgets the agent.
+        #expect(resolve(["◐ busy"]) == [.claude])
+        #expect(resolve(["✦ idle", "zsh", "◐ busy"]) == [.agy, .terminal, .claude])
     }
 
     @Test func pillText() {
@@ -90,6 +110,7 @@ struct VerticalTabsModelTests {
             #expect(settings.showIdleTime)
             #expect(settings.showShortcuts)
             #expect(settings.showIcons)
+            #expect(settings.showRecents)
         }
     }
 
@@ -102,6 +123,7 @@ struct VerticalTabsModelTests {
             settings.showIdleTime = false
             settings.showShortcuts = false
             settings.showIcons = false
+            settings.showRecents = false
 
             let reloaded = VerticalTabsSettings(defaults: defaults)
             #expect(reloaded.textSize == .large)
@@ -110,6 +132,7 @@ struct VerticalTabsModelTests {
             #expect(!reloaded.showIdleTime)
             #expect(!reloaded.showShortcuts)
             #expect(!reloaded.showIcons)
+            #expect(!reloaded.showRecents)
         }
     }
 
@@ -189,21 +212,21 @@ struct VerticalTabsModelTests {
 
     @Test func sectionsNeverDuplicateTabs() {
         let tabs = [
-            tab(0, focused: 50),
-            tab(1, focused: 90),
-            tab(2, selected: true, focused: 100),
-            tab(3, focused: 80),
+            tab(0, left: 50),
+            tab(1, left: 90),
+            tab(2, selected: true, left: 100),
+            tab(3, left: 80),
             tab(4),
-            tab(5, focused: 70),
-            tab(6, focused: 60),
-            tab(7, focused: 10),
+            tab(5, left: 70),
+            tab(6, left: 60),
+            tab(7, left: 10),
         ]
         let sections = VerticalTabs.sections(tabs: tabs, pins: ["s1", "s7"], recentsLimit: 3)
 
         #expect(ids(sections.pinned) == [id(1), id(7)])
-        // Most recent first, skipping pinned and the selected tab.
-        #expect(ids(sections.recents) == [id(3), id(5), id(6)])
-        #expect(ids(sections.open) == [id(0), id(2), id(4)])
+        // Most recently left first, skipping pinned; the selected tab keeps its place.
+        #expect(ids(sections.recents) == [id(2), id(3), id(5)])
+        #expect(ids(sections.open) == [id(0), id(4), id(6)])
 
         let all = ids(sections.pinned + sections.recents + sections.open)
         #expect(all.count == tabs.count)
@@ -212,9 +235,9 @@ struct VerticalTabsModelTests {
 
     @Test func collapsedRecentsKeepTabsInOpen() {
         let tabs = [
-            tab(0, focused: 10),
-            tab(1, selected: true, focused: 20),
-            tab(2, focused: 30),
+            tab(0, left: 10),
+            tab(1, selected: true, left: 20),
+            tab(2, left: 30),
             tab(3),
         ]
         let collapsed = VerticalTabs.sections(tabs: tabs, pins: ["s3"], recentsLimit: 0)
@@ -223,7 +246,20 @@ struct VerticalTabsModelTests {
         #expect(ids(collapsed.numbered) == [id(3), id(0), id(1), id(2)])
         // The collapsed header stays available because there are recent tabs.
         #expect(VerticalTabs.hasRecentCandidates(tabs: tabs, pins: ["s3"]))
-        #expect(!VerticalTabs.hasRecentCandidates(tabs: [tab(0, selected: true, focused: 5)], pins: []))
+        #expect(!VerticalTabs.hasRecentCandidates(tabs: [tab(0, selected: true)], pins: []))
+    }
+
+    @Test func selectingStaysInSection() {
+        // Tab 1 was selected from Recents, tab 2 from Open (never left).
+        let fromRecents = [tab(0, left: 30), tab(1, selected: true, left: 20), tab(2)]
+        let a = VerticalTabs.sections(tabs: fromRecents, pins: [])
+        #expect(ids(a.recents) == [id(0), id(1)])
+        #expect(ids(a.open) == [id(2)])
+
+        let fromOpen = [tab(0, left: 30), tab(1, left: 20), tab(2, selected: true)]
+        let b = VerticalTabs.sections(tabs: fromOpen, pins: [])
+        #expect(ids(b.recents) == [id(0), id(1)])
+        #expect(ids(b.open) == [id(2)])
     }
 
     @Test func pinnedFollowPinOrderNotTabOrder() {
@@ -235,8 +271,8 @@ struct VerticalTabsModelTests {
     @Test func shortcutsSkipRecents() {
         let tabs = [
             tab(0),
-            tab(1, focused: 10),
-            tab(2, selected: true, focused: 20),
+            tab(1, left: 10),
+            tab(2, selected: true),
             tab(3),
             tab(4),
         ]

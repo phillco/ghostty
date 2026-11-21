@@ -55,6 +55,8 @@ final class VerticalTabsGroupHost {
     private(set) var tabs: [VerticalTabs.Tab] = []
     private(set) var sections = VerticalTabs.Sections()
     private var windowsByID: [ObjectIdentifier: TerminalWindow] = [:]
+    /// The tab selected last, so the next selection can stamp when it was left.
+    weak var lastSelectedWindow: TerminalWindow?
 
     init(tabGroup: NSWindowTabGroup, manager: VerticalTabsManager) {
         self.tabGroup = tabGroup
@@ -132,6 +134,8 @@ final class VerticalTabsGroupHost {
             tracker.syncBackdrop(in: window, width: width, color: window.preferredBackgroundColor)
             let controller = window.terminalController
             let parsed = VerticalTabs.parseTitle(window.title)
+            let platform = VerticalTabs.resolvePlatform(parsed.platform, last: tracker.lastPlatform)
+            tracker.lastPlatform = platform.last
             let surfaces = controller.map { Array($0.surfaceTree) } ?? []
             let pwd = controller?.focusedSurface?.pwd ?? surfaces.first?.pwd
             return VerticalTabs.Tab(
@@ -139,11 +143,11 @@ final class VerticalTabsGroupHost {
                 surfaceIDs: surfaces.map(\.id.uuidString),
                 title: parsed.text.isEmpty ? window.title : parsed.text,
                 folder: VerticalTabs.folderName(forPath: pwd),
-                platform: parsed.platform,
+                platform: platform.shown,
                 bell: controller?.bell ?? false,
                 isSelected: window === selected,
-                lastFocused: tracker.lastFocused,
-                lastActive: tracker.lastActive ?? tracker.lastFocused,
+                lastLeft: tracker.lastLeft,
+                lastActive: tracker.lastActive ?? tracker.lastLeft,
                 claimedPinKey: tracker.claimedPinKey
             )
         }
@@ -156,11 +160,12 @@ final class VerticalTabsGroupHost {
             refresh(enforceOrder: false)
             return
         }
-        // Collapsed Recents must not hide tabs: they stay in Open instead.
-        let collapsed = manager.settings.recentsCollapsed
+        // Collapsed or hidden Recents must not hide tabs: they stay in Open instead.
+        let settings = manager.settings
+        let recentsOff = settings.recentsCollapsed || !settings.showRecents
         sections = VerticalTabs.sections(
-            tabs: tabs, pins: pins, recentsLimit: collapsed ? 0 : VerticalTabs.recentsLimit)
-        let hasRecents = VerticalTabs.hasRecentCandidates(tabs: tabs, pins: pins)
+            tabs: tabs, pins: pins, recentsLimit: recentsOff ? 0 : VerticalTabs.recentsLimit)
+        let hasRecents = settings.showRecents && VerticalTabs.hasRecentCandidates(tabs: tabs, pins: pins)
         if store.hasRecents != hasRecents { store.hasRecents = hasRecents }
         let now = Date()
         func rows(_ list: [VerticalTabs.Tab], pinned: Bool) -> [VerticalTabRow] {
