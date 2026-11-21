@@ -197,6 +197,10 @@ final class VerticalTabsSettings: ObservableObject {
         if width != stored.width { width = stored.width }
         if density != stored.density { density = stored.density }
         if textSize != stored.textSize { textSize = stored.textSize }
+        if let size = config.fontSize {
+            let useConfig = Double(size) != defaults.object(forKey: Key.textSizeOverrides) as? Double
+            if useConfigFontSize != useConfig { useConfigFontSize = useConfig }
+        }
         if showFolders != stored.showFolders { showFolders = stored.showFolders }
         if showIdleTime != stored.showIdleTime { showIdleTime = stored.showIdleTime }
         if showShortcuts != stored.showShortcuts { showShortcuts = stored.showShortcuts }

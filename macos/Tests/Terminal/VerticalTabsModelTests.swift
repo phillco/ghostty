@@ -361,6 +361,27 @@ struct VerticalTabsModelTests {
         }
     }
 
+    @Test func reloadPicksUpTextSizeOverride() {
+        withFreshDefaults { defaults in
+            let running = VerticalTabsSettings(defaults: defaults)
+            running.applyConfig(.init(fontSize: 14))
+            #expect(running.textSizeChoice == nil)
+
+            // Another process picks a preset over the same configured size, then clears it.
+            let other = VerticalTabsSettings(defaults: defaults)
+            other.applyConfig(.init(fontSize: 14))
+            other.textSizeChoice = .large
+            running.reloadFromDefaults()
+            #expect(running.textSizeChoice == .large)
+            #expect(running.fontSize == 15)
+
+            other.textSizeChoice = nil
+            running.reloadFromDefaults()
+            #expect(running.textSizeChoice == nil)
+            #expect(running.fontSize == 14)
+        }
+    }
+
     @Test func configSecondaryFontSize() {
         withFreshDefaults { defaults in
             let settings = VerticalTabsSettings(defaults: defaults)
