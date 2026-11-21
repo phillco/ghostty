@@ -392,7 +392,8 @@ private struct VerticalTabRowView: View {
     private func compactRow(pill: Bool, age showAge: Bool, titleMin: Bool, icon: Bool = true) -> some View {
         HStack(spacing: style.metrics.itemSpacing) {
             if icon, style.showIcons { glyph }
-            title(minWidth: titleMin ? style.metrics.titleMinWidth : 0)
+            // Measured at its minimum, so a long title doesn't rule out a fallback.
+            title(minWidth: titleMin ? style.metrics.titleMinWidth : 0, measuredWidth: titleMin ? style.metrics.titleMinWidth : 0)
             Spacer(minLength: style.metrics.spacerMin)
             if row.bell { bell }
             if pill, let folder { FolderPill(folder: folder, style: style) }
@@ -420,7 +421,8 @@ private struct VerticalTabRowView: View {
     }
 
     @ViewBuilder
-    private func title(minWidth: CGFloat) -> some View {
+    /// - Parameter measuredWidth: the ideal width `ViewThatFits` measures; nil for the text's own.
+    private func title(minWidth: CGFloat, measuredWidth: CGFloat? = nil) -> some View {
         if store.renamingID == row.id {
             TextField("Tab title", text: $renameText)
                 .textFieldStyle(.plain)
@@ -440,8 +442,7 @@ private struct VerticalTabRowView: View {
                 .font(.system(size: style.fontSize, weight: row.isSelected ? .semibold : .regular))
                 .lineLimit(1)
                 .truncationMode(.tail)
-                // The ideal width too, so `ViewThatFits` measures the minimum.
-                .frame(minWidth: minWidth, idealWidth: minWidth > 0 ? minWidth : nil, alignment: .leading)
+                .frame(minWidth: minWidth, idealWidth: measuredWidth, alignment: .leading)
         }
     }
 
