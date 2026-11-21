@@ -335,12 +335,18 @@ private struct VerticalTabRowView: View {
         .accessibilityAction { store.host?.select(row.id) }
         .accessibilityAction(named: "Close Tab") { store.host?.close(row.id) }
         .overlay(MiddleClickCatcher { store.host?.close(row.id) })
-        .help(row.folder.map { "\(row.title) — \($0)" } ?? row.title)
+        .help(tooltip)
         // The gap between rows belongs to their drag and drop targets (outside
         // hover, clicks and middle-click close), so dropping on the indicator
         // line never lands outside a row.
         .padding(.vertical, style.metrics.rowGap / 2)
         .contentShape(Rectangle())
+    }
+
+    /// Everything a narrow row may hide.
+    private var tooltip: String {
+        let main = row.folder.map { "\(row.title) — \($0)" } ?? row.title
+        return age.map { "\(main) · \($0)" } ?? main
     }
 
     private var dropAfter: Bool { store.dropTarget?.after ?? false }
@@ -360,7 +366,17 @@ private struct VerticalTabRowView: View {
     /// Drops the pill, then the age, before the title shrinks below
     /// `titleMinWidth` (the tooltip keeps both), and the icon last, so a row
     /// fits even the narrowest sidebar at the largest text size.
+    @ViewBuilder
     private var compact: some View {
+        if store.renamingID == row.id {
+            // One editor: a hover can't swap branches and reset the draft.
+            compactRow(pill: false, age: false, titleMin: false)
+        } else {
+            fittingCompact
+        }
+    }
+
+    private var fittingCompact: some View {
         ViewThatFits(in: .horizontal) {
             if folder != nil { compactRow(pill: true, age: true, titleMin: true) }
             compactRow(pill: false, age: true, titleMin: true)
