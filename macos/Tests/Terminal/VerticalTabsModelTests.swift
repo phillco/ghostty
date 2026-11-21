@@ -90,6 +90,56 @@ struct VerticalTabsModelTests {
         #expect(VerticalTabs.pillText("Clarc-observer").count == 12)
     }
 
+    // MARK: Copy ID
+
+    @Test func defaultPeerNames() {
+        let id = "85a92d14-377f-4112-9bb3-614db07e7b4f"
+        #expect(VerticalTabs.defaultPeerName(agent: "agy", id: id, cwd: "/Users/p/src/ports/ghostty") == "agy-ghostty-85a9")
+        #expect(VerticalTabs.defaultPeerName(agent: "agy", id: id, cwd: "/Users/p/My Repo!") == "agy-my-repo-85a9")
+        #expect(VerticalTabs.defaultPeerName(agent: "agy", id: id, cwd: "/Users/p/ghostty.worktrees") == "agy-ghostty.worktrees-85a9")
+        #expect(VerticalTabs.defaultPeerName(agent: "agy", id: id, cwd: "") == "agy-85a92d14")
+        #expect(VerticalTabs.defaultPeerName(agent: "agy", id: id, cwd: "/") == "agy-85a92d14")
+        #expect(VerticalTabs.defaultPeerName(agent: "claude", id: id, cwd: "/x") == "cc-85a92d14")
+        let long = VerticalTabs.defaultPeerName(agent: "agy", id: id, cwd: "/" + String(repeating: "abcdefghij", count: 5))
+        #expect(long == "agy-abcdefghijabcdefghijabcdefghija-85a9")
+        #expect(long.count == 40)
+    }
+
+    @Test func peerSlug() {
+        #expect(VerticalTabs.peerSlug("--Hello, World..") == "hello-world")
+        #expect(VerticalTabs.peerSlug("a_b.c-d") == "a_b.c-d")
+        #expect(VerticalTabs.peerSlug("Café") == "caf")
+    }
+
+    @Test func claudeSessionFile() throws {
+        let named = Data(#"{"pid":79146,"sessionId":"edfb2ff9-6c83-43a8-894e-4922f5a75e20","name":"bin-97","cwd":"/x"}"#.utf8)
+        let session = try #require(VerticalTabs.claudeSession(json: named))
+        #expect(session.pids == [79146])
+        #expect(session.copyText == "edfb2ff9-6c83-43a8-894e-4922f5a75e20 (bin-97)")
+
+        let unnamed = Data(#"{"pid":5,"sessionId":"edfb2ff9-6c83-43a8-894e-4922f5a75e20"}"#.utf8)
+        #expect(VerticalTabs.claudeSession(json: unnamed)?.peerId == "cc-edfb2ff9")
+        #expect(VerticalTabs.claudeSession(json: Data(#"{"sessionId":"x"}"#.utf8)) == nil)
+        #expect(VerticalTabs.claudeSession(json: Data("not json".utf8)) == nil)
+    }
+
+    @Test func clarcReadyFile() throws {
+        let agy = Data(#"{"agent":"agy","cwd":"/Users/p/src/ports/ghostty","pid":17266,"sessionId":"85a92d14-377f-4112-9bb3-614db07e7b4f"}"#.utf8)
+        let session = try #require(VerticalTabs.clarcSession(json: agy))
+        #expect(session.pids == [17266])
+        #expect(session.copyText == "85a92d14-377f-4112-9bb3-614db07e7b4f (agy-ghostty-85a9)")
+
+        let claude = Data(#"{"agent":"claude","cwd":"/x","pid":3,"sessionId":"edfb2ff9-6c83"}"#.utf8)
+        #expect(VerticalTabs.clarcSession(json: claude)?.peerId == "cc-edfb2ff9")
+    }
+
+    @Test func agHostFile() throws {
+        let data = Data(#"{"pid":17346,"cwd":"/Users/p/src/PopLab","sessionId":"ebc60ada-ff4b","agyPid":17347,"client":17179,"clients":[17180]}"#.utf8)
+        let session = try #require(VerticalTabs.agHostSession(json: data))
+        #expect(session.pids == [17179, 17180, 17347, 17346])
+        #expect(session.peerId == "agy-poplab-ebc6")
+    }
+
     // MARK: Settings
 
     /// Runs `body` against an empty defaults suite, removed afterward.

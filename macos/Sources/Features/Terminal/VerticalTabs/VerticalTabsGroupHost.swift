@@ -276,6 +276,34 @@ final class VerticalTabsGroupHost {
         DispatchQueue.main.async { controller.newTab(nil) }
     }
 
+    func copyTitle(_ id: ObjectIdentifier) {
+        guard let title = tabs.first(where: { $0.id == id })?.title else { return }
+        copyToPasteboard(title)
+    }
+
+    /// `<sessionId> (<peerId>)` for the agent session in this tab, else the
+    /// focused surface's UUID.
+    @MainActor
+    func copyID(_ id: ObjectIdentifier) {
+        guard let controller = windowsByID[id]?.terminalController else { return }
+        let focused = controller.focusedSurface
+        let surfaces = [focused].compactMap { $0 } + controller.surfaceTree.filter { $0 !== focused }
+        let terminals = surfaces.map {
+            VerticalTabsAgentLookup.Terminal(
+                ttyName: $0.surfaceModel?.ttyName, foregroundPID: $0.surfaceModel?.foregroundPID)
+        }
+        if let session = VerticalTabsAgentLookup.session(for: terminals) {
+            copyToPasteboard(session.copyText)
+        } else if let surface = surfaces.first {
+            copyToPasteboard(surface.id.uuidString)
+        }
+    }
+
+    private func copyToPasteboard(_ string: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+    }
+
     func renameText(for id: ObjectIdentifier) -> String {
         guard let window = windowsByID[id] else { return "" }
         return window.terminalController?.titleOverride ?? tabs.first { $0.id == id }?.title ?? window.title

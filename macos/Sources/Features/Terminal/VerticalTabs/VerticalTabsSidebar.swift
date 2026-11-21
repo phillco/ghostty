@@ -155,6 +155,9 @@ struct VerticalTabsSidebar: View {
                 Button(row.isPinned ? "Unpin Tab" : "Pin Tab") { store.host?.togglePin(row.id) }
                 Button("Rename Tab…") { store.renamingID = row.id }
                 Divider()
+                Button("Copy Title") { store.host?.copyTitle(row.id) }
+                Button("Copy ID") { store.host?.copyID(row.id) }
+                Divider()
                 Button("Close Tab") { store.host?.close(row.id) }
                 Button("Close Other Tabs") { store.host?.closeOthers(row.id) }
             }
