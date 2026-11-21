@@ -92,7 +92,7 @@ enum VerticalTabs {
     }
 
     /// A folder name shortened for its pill, so long repo names don't starve the title.
-    /// `maxChars` 0 never truncates.
+    /// `maxChars` 0 means no character limit.
     static func pillText(_ folder: String, maxChars: Int = 12) -> String {
         guard maxChars > 0, folder.count > maxChars else { return folder }
         return String(folder.prefix(maxChars - 1)) + "…"

@@ -455,21 +455,37 @@ private struct FolderPill: View {
 
     var body: some View {
         let hue = VerticalTabs.hue(for: folder)
-        Text(VerticalTabs.pillText(folder, maxChars: style.pillMaxChars))
-            .font(.system(size: style.secondarySize, weight: .medium))
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 0.5)
-            .foregroundStyle(Color(hue: hue, saturation: 0.35, brightness: 0.95))
-            .background(
-                Capsule().fill(Color(hue: hue, saturation: 0.5, brightness: 0.6).opacity(0.25))
-            )
-            // Full size up to `pillMaxWidth`, ahead of the title; past that it
-            // truncates (the row's tooltip has the full folder).
-            .frame(maxWidth: style.pillMaxWidth)
-            .fixedSize(horizontal: false, vertical: true)
-            .layoutPriority(1)
+        // Natural width up to `pillMaxWidth`, ahead of the title; past that it
+        // truncates (the row's tooltip has the full folder).
+        VerticalTabsWidthLimit(max: style.pillMaxWidth) {
+            Text(VerticalTabs.pillText(folder, maxChars: style.pillMaxChars))
+                .font(.system(size: style.secondarySize, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 0.5)
+                .foregroundStyle(Color(hue: hue, saturation: 0.35, brightness: 0.95))
+                .background(
+                    Capsule().fill(Color(hue: hue, saturation: 0.5, brightness: 0.6).opacity(0.25))
+                )
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(1)
+    }
+}
+
+/// Sizes its one subview to its natural width, but never wider than `max`.
+/// (`frame(maxWidth:)` would reserve the whole `max` once it gets priority.)
+struct VerticalTabsWidthLimit: Layout {
+    let max: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = min(proposal.width ?? .infinity, max)
+        return subviews.first?.sizeThatFits(.init(width: width, height: proposal.height)) ?? .zero
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: .init(bounds.size))
     }
 }
 

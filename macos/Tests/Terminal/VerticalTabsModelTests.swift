@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import SwiftUI
 import Testing
 @testable import Ghostty
 
@@ -282,6 +283,16 @@ struct VerticalTabsModelTests {
             #expect(settings.showIcons)
             #expect(settings.showRecents)
         }
+    }
+
+    @MainActor @Test func widthLimitKeepsNaturalWidth() {
+        func width(_ text: String, max: CGFloat) -> CGFloat {
+            let view = VerticalTabsWidthLimit(max: max) { Text(text).lineLimit(1) }
+            return NSHostingView(rootView: view).fittingSize.width
+        }
+        let natural = NSHostingView(rootView: Text("ghostty").lineLimit(1)).fittingSize.width
+        #expect(width("ghostty", max: 96) == natural)
+        #expect(width(String(repeating: "long-folder-name ", count: 10), max: 96) <= 96)
     }
 
     @Test func textSizePoints() {

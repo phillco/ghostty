@@ -33,7 +33,7 @@ final class VerticalTabsSettings: ObservableObject {
         var secondaryFontSize: CGFloat?
         var recentsLimit = VerticalTabs.recentsLimit
         var recentsDwell: TimeInterval = 1
-        /// 0: folder pills never truncate.
+        /// 0: no character limit (pills still stop at 40% of the sidebar).
         var pillMaxChars = 12
     }
 
