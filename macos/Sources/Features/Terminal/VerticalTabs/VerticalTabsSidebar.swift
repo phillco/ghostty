@@ -369,8 +369,12 @@ private struct VerticalTabRowView: View {
     @ViewBuilder
     private var compact: some View {
         if store.renamingID == row.id {
-            // One editor: a hover can't swap branches and reset the draft.
-            compactRow(pill: false, age: false, titleMin: false)
+            // One editor (a hover can't swap branches and reset the draft),
+            // with the row to itself; Return and Esc finish it.
+            HStack(spacing: style.metrics.itemSpacing) {
+                if style.showIcons { glyph }
+                title(minWidth: 0).layoutPriority(1)
+            }
         } else {
             fittingCompact
         }
