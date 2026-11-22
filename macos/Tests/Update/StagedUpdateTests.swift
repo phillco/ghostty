@@ -61,7 +61,7 @@ struct StagedUpdateTests {
         let json = """
         {"revision": "190f830c2ecec8c0681375e5", "dirty": true, "branch": "main", "source": "/src",
          "built_at": "2026-11-22T10:11:32", "build_host": "phillco@m5-studio", "swift": "fast",
-         "fingerprint": "f1", "subject": "macos: a thing", "future_key": 1}
+         "fingerprint": "f1", "subject": "macos: a thing", "build_id": "9f8e", "future_key": 1}
         """
         try Data(json.utf8).write(to: root.appendingPathComponent("build.json"))
         // No app bundle yet.
@@ -80,6 +80,7 @@ struct StagedUpdateTests {
         #expect(update.metadata.buildHost == "phillco@m5-studio")
         #expect(update.metadata.fingerprint == "f1")
         #expect(update.metadata.subject == "macos: a thing")
+        #expect(update.metadata.buildID == "9f8e")
         #expect(update.isFastSwift)
         #expect(update.builtAt == (try date("2026-11-22T10:11:32")))
 
@@ -96,6 +97,28 @@ struct StagedUpdateTests {
         #expect(staged(fingerprint: "b").isNewer(than: running))
         // Matching fingerprints win over differing revisions.
         #expect(!staged(revision: "def", fingerprint: "a").isNewer(than: running))
+    }
+
+    @Test func buildIDsMatchFirst() {
+        var update = staged(revision: "def", fingerprint: "b")
+        update = .init(metadata: { var m = update.metadata; m.buildID = "id1"; return m }(), location: Self.location)
+        #expect(!update.isNewer(than: RunningBuild(buildID: "id1", fingerprint: "a", revision: "abc")))
+        // A different build ID alone doesn't make the same source an update.
+        #expect(!staged(fingerprint: "a").isNewer(than: RunningBuild(buildID: "id2", fingerprint: "a")))
+        #expect(update.isNewer(than: RunningBuild(buildID: "id2", fingerprint: "a", revision: "abc")))
+    }
+
+    @Test func installRequestNamesTheBuild() throws {
+        var update = staged(builtAt: "2026-11-22T10:11:32")
+        #expect(Self.location.installRequestFile.path == "/nonexistent/install-request.json")
+        let now = Date(timeIntervalSince1970: 1_795_000_000)
+        let legacy = try JSONSerialization.jsonObject(with: update.installRequest(at: now)) as? [String: String]
+        #expect(legacy == ["revision": "abc", "built_at": "2026-11-22T10:11:32",
+                           "requested_at": ISO8601DateFormatter().string(from: now)])
+        update = .init(metadata: { var m = update.metadata; m.buildID = "0123abcd"; return m }(), location: Self.location)
+        let json = try JSONSerialization.jsonObject(with: update.installRequest(at: now)) as? [String: String]
+        #expect(json?["build_id"] == "0123abcd")
+        #expect(json?["requested_at"]?.hasSuffix("Z") == true)
     }
 
     @Test func cleanBuildsCompareRevisionAndSwift() {

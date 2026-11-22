@@ -123,13 +123,20 @@ final class StagedUpdateWatcher: @unchecked Sendable {
 /// Installs a staged build by kicking its LaunchAgent, which quits and relaunches Ghostty.
 enum StagedUpdateInstaller {
     /// Runs `launchctl kickstart` off the main thread; returns a one-line error, or nil.
-    /// Refuses if `staged/` no longer holds the build the user confirmed. The updater
-    /// installs whatever is staged when it runs, so this narrows, not closes, the window.
+    /// First writes the install request naming the confirmed build, which the updater
+    /// checks under the build lock; refusing here too if `staged/` already changed
+    /// gives a clearer error than the updater's notification.
     static func install(_ staged: StagedUpdate) async -> String? {
         guard let label = staged.location.launchAgentLabel else { return "No updater for this build" }
         return await Task.detached(priority: .userInitiated) {
             guard StagedUpdate.load(from: staged.location) == staged else {
                 return "Staged build changed; check it again"
+            }
+            let request = staged.location.installRequestFile
+            do {
+                try staged.installRequest(at: Date()).write(to: request, options: .atomic)
+            } catch {
+                return error.localizedDescription
             }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
@@ -146,6 +153,8 @@ enum StagedUpdateInstaller {
             process.waitUntilExit()
             let status = process.terminationStatus
             guard status != 0 else { return nil }
+            // The updater didn't start, so nothing will consume the request.
+            try? FileManager.default.removeItem(at: request)
             // 113: no such service, i.e. the LaunchAgent isn't loaded.
             if status == 113 { return "Updater not loaded (\(label))" }
             let message = String(bytes: output, encoding: .utf8)?

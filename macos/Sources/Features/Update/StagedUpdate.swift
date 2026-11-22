@@ -10,6 +10,12 @@ struct StagedUpdateLocation: Equatable {
     /// The LaunchAgent that installs the staged build, if this flavor has one.
     let launchAgentLabel: String?
 
+    /// Names the build the user confirmed; the updater (`ghostty-rebuild install
+    /// --expect`) consumes it and refuses to install any other staged build.
+    var installRequestFile: URL {
+        stagedDirectory.deletingLastPathComponent().appendingPathComponent("install-request.json")
+    }
+
     // Split so `ghostty-rebuild -t`, which rewrites the main ID throughout the Swift
     // sources for the test app, leaves these intact.
     static let mainBundleID = "io.phillip." + "ghostty-phil"
@@ -59,6 +65,7 @@ struct StagedUpdateLocation: Equatable {
 
 /// Build provenance `ghostty-rebuild` stamps into the running app's Info.plist.
 struct RunningBuild: Equatable {
+    var buildID: String?
     var fingerprint: String?
     var revision: String?
     var dirty: Bool?
@@ -78,6 +85,7 @@ struct RunningBuild: Equatable {
             builtAt = try? executable.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
         }
         return .init(
+            buildID: info["GhosttyPhilBuildID"] as? String,
             fingerprint: info["GhosttyPhilSourceFingerprint"] as? String,
             revision: info["GhosttyPhilSourceRevision"] as? String,
             dirty: info["GhosttyPhilSourceDirty"] as? Bool,
@@ -98,11 +106,14 @@ struct StagedUpdate: Equatable {
         var swift: String?
         var fingerprint: String?
         var subject: String?
+        /// Unique per build, unlike `fingerprint`.
+        var buildID: String?
 
         enum CodingKeys: String, CodingKey {
             case revision, dirty, branch, source, swift, fingerprint, subject
             case builtAt = "built_at"
             case buildHost = "build_host"
+            case buildID = "build_id"
         }
     }
 
@@ -129,12 +140,14 @@ struct StagedUpdate: Equatable {
     }
 
     /// Whether this staged build differs from (and, without fingerprints, is newer than)
-    /// the running one. Fingerprints decide when both exist. Otherwise a differing
+    /// the running one. The same build ID means the same build; otherwise fingerprints
+    /// decide when both exist. Otherwise a differing
     /// revision or Swift flavor counts as an update, two clean builds of the same
     /// revision are the same build, and a dirty one is newer only if it was built more
     /// than `tolerance` after the running one. Unknown running provenance counts as
     /// different; unknown build times count as current.
     func isNewer(than running: RunningBuild, tolerance: TimeInterval = 5) -> Bool {
+        if let staged = metadata.buildID, staged == running.buildID { return false }
         if let staged = metadata.fingerprint, let current = running.fingerprint {
             return staged != current
         }
@@ -143,6 +156,29 @@ struct StagedUpdate: Equatable {
         if !metadata.dirty && running.dirty != true { return false }
         guard let staged = builtAt, let current = running.builtAt else { return false }
         return staged.timeIntervalSince(current) > tolerance
+    }
+
+    /// The `install-request.json` for this build. Without a `build_id` the updater
+    /// matches on revision and `built_at`.
+    func installRequest(at now: Date) throws -> Data {
+        struct Request: Encodable {
+            let buildID: String?
+            let revision: String
+            let builtAt: String
+            let requestedAt: String
+
+            enum CodingKeys: String, CodingKey {
+                case revision
+                case buildID = "build_id"
+                case builtAt = "built_at"
+                case requestedAt = "requested_at"
+            }
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return try encoder.encode(Request(
+            buildID: metadata.buildID, revision: metadata.revision, builtAt: metadata.builtAt,
+            requestedAt: ISO8601DateFormatter().string(from: now)))
     }
 
     /// `built_at` is local time without an offset (Python `isoformat`); accept offsets too.
