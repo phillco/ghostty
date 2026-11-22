@@ -84,11 +84,11 @@ enum AgComposerKeys {
         return ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
     }
 
-    /// Only an unbound key, or ⌘C whose binding is the performable selection copy (which
-    /// has nothing to copy here), falls to the composer; any other binding keeps the key.
     static func yieldsToComposer(key: String, bindingFlags: Ghostty.Input.BindingFlags?, isCopyBinding: Bool) -> Bool {
-        guard let bindingFlags else { return true }
-        return key == "c" && isCopyBinding && bindingFlags.contains(.performable)
+        ComposerKeyPolicy.yields(key: key, bound: bindingFlags != nil,
+                                 performable: bindingFlags?.contains(.performable) == true,
+                                 crossSurface: bindingFlags?.isDisjoint(with: [.all, .global]) == false,
+                                 isCopyBinding: isCopyBinding)
     }
 }
 

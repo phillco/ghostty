@@ -424,3 +424,14 @@ extension ForegroundJob.Process {
         }
     }
 }
+
+/// Which ⌘C/⌘X presses may go to `ag`'s composer instead of a Ghostty binding: an
+/// unbound key, or ⌘C bound (performable) to the selection copy, which has nothing to
+/// copy. Any other binding keeps the key; `all:`/`global:` copies act on other
+/// surfaces too, so they always keep it.
+enum ComposerKeyPolicy {
+    static func yields(key: String, bound: Bool, performable: Bool, crossSurface: Bool, isCopyBinding: Bool) -> Bool {
+        guard bound else { return true }
+        return key == "c" && isCopyBinding && performable && !crossSurface
+    }
+}

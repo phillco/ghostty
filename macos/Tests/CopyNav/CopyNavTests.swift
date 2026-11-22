@@ -415,3 +415,17 @@ struct ForegroundJobTests {
         #expect(!ForegroundJob.isOnly(agPID: getpid(), foregroundPGID: getpgrp(), tty: "ttys000"))
     }
 }
+
+struct ComposerKeyPolicyTests {
+    @Test func onlyUnboundOrLocalPerformableCopyYields() {
+        let y = ComposerKeyPolicy.yields
+        #expect(y("x", false, false, false, false))
+        #expect(y("c", true, true, false, true))
+        // Another action on the key, a non-performable copy, or a copy that reaches
+        // other surfaces keeps the key.
+        #expect(!y("c", true, true, false, false))
+        #expect(!y("c", true, false, false, true))
+        #expect(!y("c", true, true, true, true))
+        #expect(!y("x", true, true, false, false))
+    }
+}
