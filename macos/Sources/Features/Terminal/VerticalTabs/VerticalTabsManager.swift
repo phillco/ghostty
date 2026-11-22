@@ -31,6 +31,8 @@ final class VerticalTabsManager: NSObject {
     private var agentTickTimer: Timer?
     /// The visibly focused split, and since when; see `evaluateAck`.
     private var ackFocus: VerticalTabs.Agent.Focus?
+    /// The window holding `ackFocus`; leaving it ends that visit's dwell.
+    private weak var ackFocusWindow: TerminalWindow?
     /// Acks sent per reply (`ackToken`), so refreshes never resend early.
     private var ackSent: [String: VerticalTabs.Agent.AckAttempt] = [:]
     private var ackTimer: Timer?
@@ -38,6 +40,8 @@ final class VerticalTabsManager: NSObject {
     /// show them read meanwhile. An ack agentd never confirms (failed saves,
     /// retries exhausted) shows unread again after `optimisticReadTTL`.
     private var optimisticReads: [String: Date] = [:]
+    /// Redraws when the earliest unconfirmed read expires.
+    private var optimisticExpiryTimer: Timer?
     private static let optimisticReadTTL: TimeInterval =
         VerticalTabs.Agent.ackRetryAfter * Double(VerticalTabs.Agent.ackMaxAttempts) + 5
 
@@ -412,6 +416,9 @@ final class VerticalTabsManager: NSObject {
         agentTickTimer = nil
         ackTimer?.invalidate()
         ackTimer = nil
+        optimisticReads = [:]
+        optimisticExpiryTimer?.invalidate()
+        optimisticExpiryTimer = nil
         agentDidUpdate(.init())
     }
 
@@ -422,6 +429,7 @@ final class VerticalTabsManager: NSObject {
         if snapshot.isEmpty { ackSent = [:] }
         // Confirmed (or superseded) reads need no overlay.
         optimisticReads = optimisticReads.filter { snapshot.isUnread(token: $0.key) }
+        scheduleOptimisticExpiry()
         refreshAll()
         evaluateAck()
     }
@@ -472,7 +480,16 @@ final class VerticalTabsManager: NSObject {
         let now = Date()
         let surface = visiblyFocusedSurface
         let id = surface?.id.uuidString
-        if id != ackFocus?.surfaceID { ackFocus = id.map { .init(surfaceID: $0, since: now) } }
+        if id != ackFocus?.surfaceID {
+            ackFocus = id.map { .init(surfaceID: $0, since: now) }
+            // A directional arrival's dwell lasts one focus visit: coming
+            // back to the tab later (a click into the window) acks at once.
+            let window = surface?.window as? TerminalWindow
+            if let left = ackFocusWindow, left !== window {
+                trackers[ObjectIdentifier(left)]?.enteredDirectionally = false
+            }
+            ackFocusWindow = window
+        }
         guard let surface, !agentSnapshot.isEmpty else { return }
         let session = agentSnapshot.session(for: VerticalTabsGroupHost.agentTerminal(surface))
         let dwell = VerticalTabs.Agent.ackDwell(
@@ -492,12 +509,30 @@ final class VerticalTabsManager: NSObject {
             if optimisticReads[token] == nil {
                 optimisticReads[token] = now
                 refreshAll()
-                // An unconfirmed read shows unread again once it expires.
-                scheduleAgentTick(after: Self.optimisticReadTTL)
+                scheduleOptimisticExpiry()
             }
             // Still unread later (a failed save)? Check again then.
             evaluateAckLater(at: now.addingTimeInterval(VerticalTabs.Agent.ackRetryAfter))
         }
+    }
+
+    /// An unconfirmed read shows unread again once it expires: redraw then,
+    /// at the earliest remaining expiry (each fire re-arms for the next).
+    private func scheduleOptimisticExpiry() {
+        optimisticExpiryTimer?.invalidate()
+        optimisticExpiryTimer = nil
+        let now = Date()
+        optimisticReads = optimisticReads.filter { now.timeIntervalSince($0.value) < Self.optimisticReadTTL + 60 }
+        guard let due = optimisticReads.values
+            .map({ $0.addingTimeInterval(Self.optimisticReadTTL) })
+            .filter({ $0 > now }).min() else { return }
+        let timer = Timer(fire: due, interval: 0, repeats: false) { [weak self] _ in
+            self?.refreshAll()
+            self?.scheduleOptimisticExpiry()
+        }
+        timer.tolerance = 0.1
+        RunLoop.main.add(timer, forMode: .common)
+        optimisticExpiryTimer = timer
     }
 
     /// Whether previous/next stepping landed on this tab (or is landing on it
