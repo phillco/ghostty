@@ -90,6 +90,9 @@ def prepare_package(repo: Path, package: Path) -> None:
         "macos/Sources/Helpers/SurfaceTreeUndoTarget.swift",
         "macos/Sources/Helpers/Extensions/UndoManager+Extension.swift",
         "macos/Sources/Helpers/Extensions/Duration+Extension.swift",
+        "macos/Sources/Features/CopyNav/CopyNavProtocol.swift",
+        "macos/Sources/Features/CopyNav/MarkdownHTML.swift",
+        "macos/Sources/Features/CopyNav/RichClip.swift",
     )
     tests = (
         "macos/Tests/Splits/SplitTreeTests.swift",
@@ -97,6 +100,7 @@ def prepare_package(repo: Path, package: Path) -> None:
         "macos/Tests/Ghostty/NSEventViewportTests.swift",
         "macos/Tests/Helpers/ExpiringUndoManagerTests.swift",
         "macos/Tests/Helpers/SurfaceTreeUndoTargetTests.swift",
+        "macos/Tests/CopyNav/CopyNavTests.swift",
     )
     for relative in (
         *sources,

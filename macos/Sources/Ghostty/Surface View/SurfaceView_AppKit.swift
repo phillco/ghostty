@@ -1418,6 +1418,11 @@ extension Ghostty {
                 return false
             }
 
+            // ⌘C with no selection and ⌘X edit ag's composer draft.
+            if AgComposerKeys.handle(event, view: self) {
+                return true
+            }
+
             // Get information about if this is a binding.
             let bindingFlags = surfaceModel.flatMap { surface in
                 var ghosttyEvent = event.ghosttyKeyEvent(GHOSTTY_ACTION_PRESS)

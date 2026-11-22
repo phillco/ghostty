@@ -2577,7 +2577,7 @@ fn semanticCopySnapshot(
         return null;
     };
     defer self.alloc.free(json);
-    return .{ .plain = plain, .json = try self.alloc.dupeZ(u8, json) };
+    return .{ .plain = plain, .json = try self.alloc.dupeSentinel(u8, json, 0) };
 }
 
 /// Scrolls to the `ghostty-phil://msg` anchor matching `uri` (by gen+seg or

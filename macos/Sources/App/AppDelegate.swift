@@ -186,6 +186,14 @@ class AppDelegate: NSObject,
     // MARK: - NSApplicationDelegate
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // Our URL scheme opened from other apps. A GetURL handler rather than
+        // application(_:open:), which would also take over file opens.
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleGetURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL))
+
         #if DEBUG
         if
             let suite = UserDefaults.ghosttySuite,
@@ -473,6 +481,17 @@ class AppDelegate: NSObject,
         // No visible windows, open a new one.
         _ = TerminalController.newWindow(ghostty)
         return false
+    }
+
+    /// External `ghostty-phil://` opens: message links navigate, focus links focus, and
+    /// copy links are ignored so other apps can't write the clipboard through us.
+    @objc private func handleGetURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
+        guard let url = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue else { return }
+        // Apple events are delivered on the main thread.
+        MainActor.assumeIsolated {
+            if MsgLink.handleExternal(url) { return }
+            _ = FocusLink.handle(url)
+        }
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {

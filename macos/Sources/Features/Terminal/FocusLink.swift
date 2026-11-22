@@ -41,7 +41,7 @@ enum FocusLink {
         return true
     }
 
-    private static func surface(tty: String) -> Ghostty.SurfaceView? {
+    static func surface(tty: String) -> Ghostty.SurfaceView? {
         let want = bare(tty)
         return NSApp.windows
             .compactMap { $0.windowController as? BaseTerminalController }

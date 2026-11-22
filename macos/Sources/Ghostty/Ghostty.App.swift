@@ -502,6 +502,17 @@ extension Ghostty {
             assert(contentArray.filter({ $0.mime == "text/plain" }).count <= 1,
                    "clipboard contents should have at most one text/plain entry")
 
+            // Explicit rich copy below an ag anchor: plain now, semantic flavors once ag
+            // resolves the snapshot. Never Ghostty's own HTML for these.
+            if !confirm, location == GHOSTTY_CLIPBOARD_STANDARD,
+               let snapshot = contentArray.first(where: { $0.mime == SelectionSnapshot.mime }),
+               let plain = contentArray.first(where: { $0.mime == "text/plain" })?.string {
+                MainActor.assumeIsolated {
+                    CopyProvider.copySelection(snapshot: snapshot.data, plain: plain, view: surfaceView, pasteboard: pasteboard)
+                }
+                return
+            }
+
             if !confirm {
                 // Apply writes allowed by policy immediately. Only writes that
                 // require confirmation continue to the pending request below.
@@ -822,6 +833,15 @@ extension Ghostty {
             target: ghostty_target_s? = nil
         ) -> Bool {
             let action = Ghostty.Action.OpenURL(c: v)
+
+            // ag copy chips and message anchors; copy links only count from a surface.
+            let originView = target.flatMap { t -> SurfaceView? in
+                guard t.tag == GHOSTTY_TARGET_SURFACE, let surface = t.target.surface else { return nil }
+                return surfaceView(from: surface)
+            }
+            if MainActor.assumeIsolated({ MsgLink.handleClick(action.url, view: originView) }) {
+                return true
+            }
 
             // Agent peer badges: focus the linked terminal without going through Launch Services.
             if MainActor.assumeIsolated({ FocusLink.handle(action.url) }) {
