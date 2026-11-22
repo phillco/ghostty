@@ -355,6 +355,18 @@ extension VerticalTabs.Agent {
         }
     }
 
+    /// Badge priority: needs-you/blocked, waiting, done, active, then
+    /// anything else (a progress-only note outranks nothing).
+    static func noteRank(_ note: Note) -> Int {
+        switch badgeKind(noteState: note.state) {
+        case .attention?: return 4
+        case .waiting?: return 3
+        case .done?: return 2
+        case .active?: return 1
+        case nil: return 0
+        }
+    }
+
     static let activeJobStatuses: Set<String> = ["running", "finishing", "blocked"]
 
     /// Aggregates `sessions` (matched splits, focused first; duplicates
@@ -370,15 +382,20 @@ extension VerticalTabs.Agent {
         }
         guard let (primary, display) = best else { return nil }
 
-        let note = unique.lazy.compactMap { session -> Note? in
+        // Every live note goes in the tooltip; the badge shows the one that
+        // matters most (a request for you), ties to the earlier split.
+        let notes = unique.compactMap { session -> Note? in
             guard let note = session.note, note.stale != true else { return nil }
             return note
-        }.first { badgeKind(noteState: $0.state) != nil || $0.progress != nil }
-            ?? primary.note.flatMap { $0.stale == true ? nil : $0 }
+        }
+        let note = notes.enumerated().max { a, b in
+            let (ra, rb) = (noteRank(a.element), noteRank(b.element))
+            return ra != rb ? ra < rb : a.offset > b.offset
+        }?.element
         let jobs = unique.flatMap(\.childJobs).filter { activeJobStatuses.contains($0.status) }
 
         var details: [String] = []
-        if let note {
+        for note in notes {
             var line = note.icon.map { "\($0) " } ?? ""
             line += note.state
             if !note.text.isEmpty { line += ": \(note.text)" }

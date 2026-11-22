@@ -193,6 +193,17 @@ struct VerticalTabsAgentTests {
         #expect(Agent.badgeKind(noteState: state) == kind)
     }
 
+    @Test func aSiblingsRequestOutranksTheFocusedSplitsActiveNote() throws {
+        let focused = session("f", .idle, note: .init(state: "active", text: "Refactoring"))
+        let sibling = session("s", .idle, note: .init(state: "needs-you", text: "Pick a plan"))
+        let summary = try #require(Agent.summary(of: [focused, sibling]))
+        #expect(summary.badge.kind == .attention)
+        #expect(summary.details == ["active: Refactoring", "needs-you: Pick a plan"])
+        // Equal rank: the focused split's note.
+        let other = session("o", .idle, note: .init(state: "needs-you", text: "Other", progress: "1/2"))
+        #expect(try #require(Agent.summary(of: [sibling, other])).badge.progress == nil)
+    }
+
     @Test func activeNoteAloneDrawsNoBadge() throws {
         let summary = try #require(Agent.summary(of: [session("k", .idle, note: .init(state: "active", text: "x"))]))
         #expect(summary.badge.isEmpty)
