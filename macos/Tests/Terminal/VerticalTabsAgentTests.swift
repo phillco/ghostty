@@ -262,22 +262,38 @@ struct VerticalTabsAgentTests {
     @Test func noAckBeforeTheDwell() {
         let focus = Agent.Focus(surfaceID: "s", since: now.addingTimeInterval(-1))
         let unread = session("k", .idle, unread: true, reply: 1)
-        #expect(Agent.ackDecision(focus: focus, session: unread, now: now, dwell: dwell, sent: [])
+        #expect(Agent.ackDecision(focus: focus, session: unread, now: now, dwell: dwell, sent: [:])
             == .wait(until: now.addingTimeInterval(2)))
     }
 
     @Test func acksOnceAfterTheDwell() {
         let focus = Agent.Focus(surfaceID: "s", since: now.addingTimeInterval(-3))
         let unread = session("k", .idle, unread: true, reply: 1)
-        #expect(Agent.ackDecision(focus: focus, session: unread, now: now, dwell: dwell, sent: [])
+        #expect(Agent.ackDecision(focus: focus, session: unread, now: now, dwell: dwell, sent: [:])
             == .send(key: "k", replyId: "r1"))
-        let sent: Set = [Agent.ackToken(key: "k", replyId: "r1")]
-        #expect(Agent.ackDecision(focus: focus, session: unread, now: now, dwell: dwell, sent: sent) == .none)
+        let sent = [Agent.ackToken(key: "k", replyId: "r1"): Agent.AckAttempt(count: 1, last: now)]
+        #expect(Agent.ackDecision(focus: focus, session: unread, now: now, dwell: dwell, sent: sent)
+            == .wait(until: now.addingTimeInterval(Agent.ackRetryAfter)))
+    }
+
+    @Test func aReplyStillUnreadIsRetriedAFewTimes() {
+        let focus = Agent.Focus(surfaceID: "s", since: now.addingTimeInterval(-60))
+        let unread = session("k", .idle, unread: true, reply: 1)
+        let token = Agent.ackToken(key: "k", replyId: "r1")
+        let later = now.addingTimeInterval(Agent.ackRetryAfter)
+        let once = [token: Agent.AckAttempt(count: 1, last: now)]
+        #expect(Agent.ackDecision(focus: focus, session: unread, now: later, dwell: dwell, sent: once)
+            == .send(key: "k", replyId: "r1"))
+        let exhausted = [token: Agent.AckAttempt(count: Agent.ackMaxAttempts, last: now)]
+        #expect(Agent.ackDecision(focus: focus, session: unread, now: later, dwell: dwell, sent: exhausted) == .none)
+        // Acknowledged (no longer unread): nothing more to send.
+        let read = session("k", .idle, unread: false, reply: 1)
+        #expect(Agent.ackDecision(focus: focus, session: read, now: later, dwell: dwell, sent: once) == .none)
     }
 
     @Test func aNewReplyWhileFocusedAcksImmediately() {
         let focus = Agent.Focus(surfaceID: "s", since: now.addingTimeInterval(-60))
-        let sent: Set = [Agent.ackToken(key: "k", replyId: "r1")]
+        let sent = [Agent.ackToken(key: "k", replyId: "r1"): Agent.AckAttempt(count: 1, last: now)]
         let newer = session("k", .idle, unread: true, reply: 2)
         #expect(Agent.ackDecision(focus: focus, session: newer, now: now, dwell: dwell, sent: sent)
             == .send(key: "k", replyId: "r2"))
@@ -287,13 +303,13 @@ struct VerticalTabsAgentTests {
         let focus = Agent.Focus(surfaceID: "s", since: now.addingTimeInterval(-60))
         let unread = session("k", .idle, unread: true, reply: 1)
         // No visibly focused split: background tab, unfocused window or inactive app.
-        #expect(Agent.ackDecision(focus: nil, session: unread, now: now, dwell: dwell, sent: []) == .none)
+        #expect(Agent.ackDecision(focus: nil, session: unread, now: now, dwell: dwell, sent: [:]) == .none)
         // The focused split has no session (its neighbor's unread stays).
-        #expect(Agent.ackDecision(focus: focus, session: nil, now: now, dwell: dwell, sent: []) == .none)
+        #expect(Agent.ackDecision(focus: focus, session: nil, now: now, dwell: dwell, sent: [:]) == .none)
         let read = session("k", .idle, unread: false, reply: 1)
-        #expect(Agent.ackDecision(focus: focus, session: read, now: now, dwell: dwell, sent: []) == .none)
+        #expect(Agent.ackDecision(focus: focus, session: read, now: now, dwell: dwell, sent: [:]) == .none)
         let noReply = session("k", .idle, unread: true)
-        #expect(Agent.ackDecision(focus: focus, session: noReply, now: now, dwell: dwell, sent: []) == .none)
+        #expect(Agent.ackDecision(focus: focus, session: noReply, now: now, dwell: dwell, sent: [:]) == .none)
     }
 
     // MARK: Narrow rows
@@ -312,9 +328,12 @@ struct VerticalTabsAgentTests {
         #expect(glyph < full)
         // The glyph alone is about one character, so it fits beside `titleMinWidth`.
         #expect(glyph <= fontSize * 1.5)
-        let mark = NSHostingView(rootView: VerticalTabsAgentBadges.StatusMark(
-            status: .awaiting, awaitingKind: "approval", metrics: metrics)).fittingSize
-        #expect(mark.width <= metrics.secondarySize + 0.5)
+        // Status dots sit in the row's leading padding, costing the title nothing.
+        for status in [Agent.Display.awaiting, .working, .unread] {
+            let dot = NSHostingView(rootView: VerticalTabsAgentBadges.StatusDot(
+                status: status, metrics: metrics)).fittingSize
+            #expect(dot.width < metrics.rowPadding)
+        }
     }
 }
 

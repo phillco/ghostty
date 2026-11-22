@@ -318,6 +318,9 @@ private struct VerticalTabRowView: View {
         }
         .padding(.horizontal, style.metrics.rowPadding)
         .frame(maxWidth: .infinity, minHeight: style.metrics.minRowHeight, alignment: .leading)
+        // Status lives in the leading padding, like Mail's unread dot, so
+        // titles stay aligned and narrow rows lose nothing to it.
+        .overlay(alignment: .leading) { statusDot }
         .background(
             RoundedRectangle(cornerRadius: style.metrics.cornerRadius, style: .continuous)
                 .fill(Color.primary.opacity(row.isSelected ? 0.11 : hovering ? 0.05 : 0))
@@ -412,7 +415,6 @@ private struct VerticalTabRowView: View {
     ) -> some View {
         HStack(spacing: style.metrics.itemSpacing) {
             if icon, style.showIcons { glyph }
-            statusMark
             title(minWidth: titleMin, measuredWidth: measured)
             Spacer(minLength: style.metrics.spacerMin)
             if hasBadge, badge != .none {
@@ -427,7 +429,6 @@ private struct VerticalTabRowView: View {
     private var tall: some View {
         HStack(alignment: .center, spacing: style.metrics.itemSpacing) {
             if style.showIcons { glyph }
-            statusMark
             VStack(alignment: .leading, spacing: 2) {
                 title(minWidth: 0)
                 if folder != nil || row.bell || age != nil || hasBadge {
@@ -481,10 +482,11 @@ private struct VerticalTabRowView: View {
 
     private var glyph: some View {
         Group {
-            switch row.platform {
-            case .agy: Text("✦").foregroundStyle(Color(hue: 0.58, saturation: 0.55, brightness: 0.95))
-            case .claude: Text("✳").foregroundStyle(Color(hue: 0.05, saturation: 0.6, brightness: 0.95))
-            case .terminal: Image(systemName: "terminal").foregroundStyle(.secondary)
+            if row.status == .awaiting {
+                // Needs you: the amber mark outranks the platform (the tooltip keeps it).
+                VerticalTabsAgentBadges.AwaitingMark(awaitingKind: row.awaitingKind)
+            } else {
+                platformGlyph
             }
         }
         .font(.system(size: style.secondarySize))
@@ -492,10 +494,20 @@ private struct VerticalTabRowView: View {
     }
 
     @ViewBuilder
-    private var statusMark: some View {
+    private var platformGlyph: some View {
+            switch row.platform {
+            case .agy: Text("✦").foregroundStyle(Color(hue: 0.58, saturation: 0.55, brightness: 0.95))
+            case .claude: Text("✳").foregroundStyle(Color(hue: 0.05, saturation: 0.6, brightness: 0.95))
+            case .terminal: Image(systemName: "terminal").foregroundStyle(.secondary)
+            }
+    }
+
+    @ViewBuilder
+    private var statusDot: some View {
         if let status = row.status, status != .idle {
-            VerticalTabsAgentBadges.StatusMark(
-                status: status, awaitingKind: row.awaitingKind, metrics: style.metrics)
+            VerticalTabsAgentBadges.StatusDot(status: status, metrics: style.metrics)
+                .frame(width: style.metrics.rowPadding)
+                .allowsHitTesting(false)
         }
     }
 

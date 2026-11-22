@@ -455,16 +455,31 @@ extension VerticalTabs.Agent {
         case send(key: String, replyId: String)
     }
 
+    /// Acks sent for one reply. agentd answers a failed save with `ok:false`
+    /// and the reply stays unread, so a reply still unread `ackRetryAfter`
+    /// later is sent again, at most `ackMaxAttempts` times.
+    struct AckAttempt: Equatable {
+        var count: Int
+        var last: Date
+    }
+
+    static let ackRetryAfter: TimeInterval = 5
+    static let ackMaxAttempts = 3
+
     /// Whether to acknowledge the reply shown in the visibly focused split.
     /// Only an unread reply, only after the split has been focused for
-    /// `dwell` (stepping past a tab keeps its dot), and each reply once.
-    /// A reply arriving after the dwell sends right away.
+    /// `dwell` (stepping past a tab keeps its dot), and each reply once unless
+    /// it stays unread (bounded retries). A reply arriving after the dwell
+    /// sends right away.
     static func ackDecision(
-        focus: Focus?, session: Session?, now: Date, dwell: TimeInterval, sent: Set<String>
+        focus: Focus?, session: Session?, now: Date, dwell: TimeInterval, sent: [String: AckAttempt]
     ) -> AckDecision {
-        guard let focus, let session, session.unread, !session.lastReplyId.isEmpty,
-              !sent.contains(ackToken(key: session.key, replyId: session.lastReplyId)) else { return .none }
-        let due = focus.since.addingTimeInterval(dwell)
+        guard let focus, let session, session.unread, !session.lastReplyId.isEmpty else { return .none }
+        var due = focus.since.addingTimeInterval(dwell)
+        if let attempt = sent[ackToken(key: session.key, replyId: session.lastReplyId)] {
+            guard attempt.count < ackMaxAttempts else { return .none }
+            due = max(due, attempt.last.addingTimeInterval(ackRetryAfter))
+        }
         if now < due { return .wait(until: due) }
         return .send(key: session.key, replyId: session.lastReplyId)
     }

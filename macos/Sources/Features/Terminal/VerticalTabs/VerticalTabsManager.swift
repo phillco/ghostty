@@ -31,8 +31,8 @@ final class VerticalTabsManager: NSObject {
     private var agentTickTimer: Timer?
     /// The visibly focused split, and since when; see `evaluateAck`.
     private var ackFocus: VerticalTabs.Agent.Focus?
-    /// Replies already acknowledged (`ackToken`), so refreshes never resend.
-    private var ackSent: Set<String> = []
+    /// Acks sent per reply (`ackToken`), so refreshes never resend early.
+    private var ackSent: [String: VerticalTabs.Agent.AckAttempt] = [:]
     private var ackTimer: Timer?
 
     var isEnabled: Bool { settings.enabled }
@@ -391,7 +391,7 @@ final class VerticalTabsManager: NSObject {
         guard snapshot != agentSnapshot else { return }
         agentSnapshot = snapshot
         // A new connection may need a reply acknowledged again.
-        if snapshot.isEmpty { ackSent = [] }
+        if snapshot.isEmpty { ackSent = [:] }
         refreshAll()
         evaluateAck()
     }
@@ -421,6 +421,12 @@ final class VerticalTabsManager: NSObject {
         return surface
     }
 
+    private func evaluateAckLater(at date: Date) {
+        let timer = Timer(fire: date, interval: 0, repeats: false) { [weak self] _ in self?.evaluateAck() }
+        RunLoop.main.add(timer, forMode: .common)
+        ackTimer = timer
+    }
+
     /// Acknowledges the unread reply in the visibly focused split once it has
     /// been focused for the Recents dwell: a step past a tab keeps its dot.
     /// Unfocused splits, background tabs and an inactive app never ack.
@@ -439,12 +445,13 @@ final class VerticalTabsManager: NSObject {
         case .none:
             break
         case .wait(let until):
-            let timer = Timer(fire: until, interval: 0, repeats: false) { [weak self] _ in self?.evaluateAck() }
-            RunLoop.main.add(timer, forMode: .common)
-            ackTimer = timer
+            evaluateAckLater(at: until)
         case .send(let key, let replyId):
-            ackSent.insert(VerticalTabs.Agent.ackToken(key: key, replyId: replyId))
+            let token = VerticalTabs.Agent.ackToken(key: key, replyId: replyId)
+            ackSent[token] = .init(count: (ackSent[token]?.count ?? 0) + 1, last: now)
             client.ackReply(key: key, replyId: replyId)
+            // Still unread later (a failed save)? Check again then.
+            evaluateAckLater(at: now.addingTimeInterval(VerticalTabs.Agent.ackRetryAfter))
         }
     }
 

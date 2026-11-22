@@ -29,32 +29,37 @@ enum VerticalTabsAgentBadges {
         }
     }
 
-    /// A dot (working, unread) or an amber attention glyph (awaiting), sized
-    /// in proportion to the text.
-    struct StatusMark: View {
+    /// The leading-gutter dot: amber awaiting, orange working, blue unread.
+    struct StatusDot: View {
         let status: VerticalTabs.Agent.Display
-        let awaitingKind: String
         let metrics: VerticalTabsMetrics
 
         var body: some View {
-            let size = metrics.secondarySize
-            Group {
-                switch status {
-                case .awaiting:
-                    Image(systemName: awaitingKind == "question" ? "questionmark.circle.fill"
-                        : awaitingKind == "approval" ? "hand.raised.circle.fill" : "exclamationmark.circle.fill")
-                        .font(.system(size: size, weight: .semibold))
-                        .foregroundStyle(amber)
-                case .working:
-                    Circle().fill(working).frame(width: size * 0.45, height: size * 0.45)
-                case .unread:
-                    Circle().fill(unread).frame(width: size * 0.55, height: size * 0.55)
-                case .idle:
-                    EmptyView()
-                }
+            let size = (metrics.secondarySize * (status == .working ? 0.42 : 0.52)).rounded()
+            Circle()
+                .fill(color)
+                .frame(width: size, height: size)
+                .accessibilityLabel(status == .awaiting ? "Awaiting" : status == .working ? "Working" : "Unread")
+        }
+
+        private var color: Color {
+            switch status {
+            case .awaiting: return amber
+            case .working: return working
+            case .unread: return unread
+            case .idle: return .clear
             }
-            .frame(width: size, height: size)
-            .accessibilityLabel(status == .awaiting ? "Awaiting" : status == .working ? "Working" : "Unread")
+        }
+    }
+
+    /// Takes the platform glyph's place while a session waits on you.
+    struct AwaitingMark: View {
+        let awaitingKind: String
+
+        var body: some View {
+            Image(systemName: awaitingKind == "question" ? "questionmark.circle.fill" : "exclamationmark.circle.fill")
+                .fontWeight(.semibold)
+                .foregroundStyle(amber)
         }
     }
 
