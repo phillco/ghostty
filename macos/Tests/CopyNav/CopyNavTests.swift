@@ -424,11 +424,65 @@ struct RichClipTests {
 struct ForegroundJobTests {
     @Test func readsOwnProcessAndGroup() throws {
         let me = try #require(ForegroundJob.process(getpid()))
-        #expect(me.uid == getuid() && me.pgid == getpgrp() && !me.comm.isEmpty)
+        #expect(me.uid == getuid() && me.pgid == getpgrp() && me.ppid == getppid() && !me.comm.isEmpty)
         #expect(!me.isAg)
         #expect(ForegroundJob.group(getpgrp()).contains { $0.pid == getpid() })
         // Not an ag, so never eligible for composer keys.
         #expect(!ForegroundJob.isOnly(agPID: getpid(), foregroundPGID: getpgrp(), tty: "ttys000"))
+    }
+
+    @Test func allowsWaitingAncestorsInRestoredTabButRejectsEditorsAndSiblings() {
+        let uid = getuid()
+        let login = ForegroundJob.Process(pid: 100, ppid: 50, pgid: 100, uid: uid, comm: "login")
+        let fish = ForegroundJob.Process(pid: 101, ppid: 100, pgid: 100, uid: uid, comm: "fish")
+        let ag = ForegroundJob.Process(pid: 102, ppid: 101, pgid: 100, uid: uid, comm: "ag")
+        let adapter = ForegroundJob.Process(pid: 103, ppid: 102, pgid: 100, uid: uid, comm: "claude")
+        let editor = ForegroundJob.Process(pid: 104, ppid: 102, pgid: 100, uid: uid, comm: "nvim")
+        let orphanEditor = ForegroundJob.Process(pid: 105, ppid: 1, pgid: 100, uid: uid, comm: "nvim")
+        let sibling = ForegroundJob.Process(pid: 106, ppid: 101, pgid: 100, uid: uid, comm: "less")
+
+        // Restored tab: login -> fish -> ag share pgid + tty stdin; adapter is on pipes.
+        #expect(ForegroundJob.isOnly(
+            agPID: 102,
+            foregroundPGID: 100,
+            group: [login, fish, ag, adapter],
+            readsTTY: { [100, 101, 102].contains($0) }))
+
+        // Ctrl+G editor spawned by ag shares pgid + tty stdin -> must NOT forward composer keys.
+        #expect(!ForegroundJob.isOnly(
+            agPID: 102,
+            foregroundPGID: 100,
+            group: [login, fish, ag, adapter, editor],
+            readsTTY: { [100, 101, 102, 104].contains($0) }))
+
+        // Reparented grandchild editor in same pgid reading tty -> must NOT forward.
+        #expect(!ForegroundJob.isOnly(
+            agPID: 102,
+            foregroundPGID: 100,
+            group: [login, fish, ag, orphanEditor],
+            readsTTY: { [100, 101, 102, 105].contains($0) }))
+
+        // Non-ancestor sibling sharing pgid + tty stdin -> must NOT forward.
+        #expect(!ForegroundJob.isOnly(
+            agPID: 102,
+            foregroundPGID: 100,
+            group: [login, fish, ag, sibling],
+            readsTTY: { [100, 101, 102, 106].contains($0) }))
+
+        // Stopped ag -> must NOT forward even if it shares pgid with fish.
+        let stoppedAg = ForegroundJob.Process(pid: 102, ppid: 101, pgid: 100, uid: uid, comm: "ag", stat: Int8(SSTOP))
+        #expect(!ForegroundJob.isOnly(
+            agPID: 102,
+            foregroundPGID: 100,
+            group: [login, fish, stoppedAg],
+            readsTTY: { [100, 101, 102].contains($0) }))
+
+        // Async `ag &` in a non-job-control shell has stdin redirected to /dev/null -> must NOT forward.
+        #expect(!ForegroundJob.isOnly(
+            agPID: 102,
+            foregroundPGID: 100,
+            group: [login, fish, ag],
+            readsTTY: { [100, 101].contains($0) }))
     }
 }
 

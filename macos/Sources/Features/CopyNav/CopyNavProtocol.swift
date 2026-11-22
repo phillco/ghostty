@@ -367,11 +367,15 @@ enum CopyResolver {
 enum ForegroundJob {
     struct Process {
         var pid: Int32
+        var ppid: Int32
         var pgid: Int32
         var uid: uid_t
         var comm: String
+        var stat: Int8 = Int8(SRUN)
 
-        var isAg: Bool { uid == getuid() && comm == "ag" }
+        var isAg: Bool {
+            uid == getuid() && comm == "ag" && stat != Int8(SSTOP) && stat != Int8(SZOMB)
+        }
     }
 
     static func process(_ pid: Int32) -> Process? {
@@ -402,14 +406,46 @@ enum ForegroundJob {
         }
     }
 
-    /// True when `agPID` is an `ag` of ours, it leads or belongs to the terminal's
-    /// foreground process group, and no other process in that group reads the terminal.
-    /// `ag`'s backend adapters share its group on pipes; an external editor it runs
-    /// (Ctrl+G) shares its group and the tty, and must get its keys untouched.
+    /// True when `agPID` is a live `ag` of ours whose stdin is this tty, it belongs to
+    /// the terminal's foreground process group, and no non-ancestor process in that group
+    /// reads the terminal. Restored tabs can leave `login -> fish -> ag` sharing one
+    /// foreground group and tty fd 0 while the parent shell waits on `ag` (Darwin hides
+    /// wait channels from unprivileged callers, so requiring `ag` itself to hold tty fd 0
+    /// rejects POSIX async `ag &` in non-job-control shells while excluding `ag`'s
+    /// ancestors). `ag`'s backend adapters share its group on pipes; an external editor
+    /// it runs (Ctrl+G) or any non-ancestor tty reader must get its keys untouched.
     static func isOnly(agPID: Int32, foregroundPGID: Int32, tty: String) -> Bool {
         guard let ag = process(agPID), ag.isAg, ag.pgid == foregroundPGID else { return false }
         let device = "/dev/" + ClarcReady.bareTTY(tty)
-        return !group(foregroundPGID).contains { $0.pid != agPID && stdinPath($0.pid) == device }
+        return isOnly(
+            agPID: agPID,
+            foregroundPGID: foregroundPGID,
+            group: group(foregroundPGID),
+            lookup: process,
+            readsTTY: { stdinPath($0) == device })
+    }
+
+    static func isOnly(
+        agPID: Int32,
+        foregroundPGID: Int32,
+        group members: [Process],
+        lookup: (Int32) -> Process? = { _ in nil },
+        readsTTY: (Int32) -> Bool
+    ) -> Bool {
+        guard let ag = members.first(where: { $0.pid == agPID }) ?? lookup(agPID),
+              ag.isAg,
+              ag.pgid == foregroundPGID,
+              readsTTY(agPID) else { return false }
+        var byPID: [Int32: Process] = [:]
+        byPID.reserveCapacity(members.count)
+        for member in members { byPID[member.pid] = member }
+        var ancestors: Set<Int32> = [agPID]
+        var cur = ag.ppid
+        for _ in 0..<64 where cur > 1 && ancestors.insert(cur).inserted {
+            guard let parent = byPID[cur] ?? lookup(cur) else { break }
+            cur = parent.ppid
+        }
+        return !members.contains { !ancestors.contains($0.pid) && readsTTY($0.pid) }
     }
 }
 
@@ -417,8 +453,10 @@ extension ForegroundJob.Process {
     init(_ info: kinfo_proc) {
         var p = info.kp_proc
         pid = p.p_pid
+        ppid = info.kp_eproc.e_ppid
         pgid = info.kp_eproc.e_pgid
         uid = info.kp_eproc.e_ucred.cr_uid
+        stat = p.p_stat
         comm = withUnsafeBytes(of: &p.p_comm) { raw in
             String(bytes: raw.prefix { $0 != 0 }, encoding: .utf8) ?? ""
         }
