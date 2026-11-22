@@ -2178,6 +2178,14 @@ pub fn hasSelection(self: *const Surface) bool {
     return self.io.terminal.screens.active.selection != null;
 }
 
+/// The active screen's current Kitty keyboard protocol flags (0 when the
+/// running program hasn't enabled the protocol).
+pub fn kittyKeyboardFlags(self: *const Surface) u8 {
+    self.renderer_state.mutex.lockUncancelable(global.io());
+    defer self.renderer_state.mutex.unlock(global.io());
+    return @intCast(self.io.terminal.screens.active.kitty_keyboard.current().int());
+}
+
 /// Returns the selected text. This is allocated.
 pub fn selectionString(self: *Surface, alloc: Allocator) !?[:0]const u8 {
     self.renderer_state.mutex.lockUncancelable(global.io());
@@ -2539,9 +2547,11 @@ fn semanticCopySnapshot(
 ) !?SemanticCopy {
     if (comptime apprt.runtime != apprt.embedded) return null;
     if (format != .mixed and format != .markdown) return null;
-    if (sel.rectangle) return null;
-
     const screen = self.io.terminal.screens.active;
+    // Find the anchor before formatting so ordinary copies format only once.
+    const anchor = try copy_nav.selectionAnchor(self.alloc, screen, sel) orelse return null;
+    defer anchor.deinit(self.alloc);
+
     var aw: std.Io.Writer.Allocating = .init(self.alloc);
     defer aw.deinit();
     var formatter: terminal.formatter.ScreenFormatter = .init(screen, .{
@@ -2559,6 +2569,7 @@ fn semanticCopySnapshot(
         self.alloc,
         screen,
         sel,
+        anchor,
         plain,
         if (format == .markdown) .markdown else .rich,
     ) orelse {
@@ -2575,7 +2586,11 @@ pub fn scrollToAnchor(self: *Surface, uri: []const u8) bool {
     {
         self.renderer_state.mutex.lockUncancelable(global.io());
         defer self.renderer_state.mutex.unlock(global.io());
-        if (!copy_nav.scrollToAnchor(self.io.terminal.screens.active, uri)) return false;
+        const found = copy_nav.scrollToAnchor(self.alloc, self.io.terminal.screens.active, uri) catch |err| {
+            log.warn("anchor scroll failed err={}", .{err});
+            return false;
+        };
+        if (!found) return false;
     }
     self.queueRender() catch |err| log.warn("queueRender after anchor scroll err={}", .{err});
     return true;

@@ -1276,6 +1276,7 @@ GHOSTTY_API void ghostty_surface_complete_clipboard_request(
 GHOSTTY_API void ghostty_surface_deny_clipboard_request(ghostty_surface_t,
                                                            void*);
 GHOSTTY_API bool ghostty_surface_has_selection(ghostty_surface_t);
+GHOSTTY_API uint8_t ghostty_surface_kitty_keyboard_flags(ghostty_surface_t);
 GHOSTTY_API bool ghostty_surface_selection_range(ghostty_surface_t,
                                                ghostty_selection_range_s*);
 GHOSTTY_API bool ghostty_surface_set_selection_range(ghostty_surface_t,

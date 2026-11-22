@@ -1938,6 +1938,11 @@ pub const CAPI = struct {
     }
 
     /// Returns true if the surface has a selection.
+    /// The current Kitty keyboard protocol flags; 0 when it's inactive.
+    export fn ghostty_surface_kitty_keyboard_flags(surface: *Surface) u8 {
+        return surface.core_surface.kittyKeyboardFlags();
+    }
+
     export fn ghostty_surface_has_selection(surface: *Surface) bool {
         return surface.core_surface.hasSelection();
     }
