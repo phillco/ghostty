@@ -333,7 +333,8 @@ extension VerticalTabs.Agent {
         /// New output short of a reply: dim, and `vertical-tabs-activity-indicator` can hide it.
         case activity
 
-        /// Any matched split unread, else any with new activity.
+        /// Any matched split unread, else any with new activity, whatever
+        /// their status (`unknown` included: an unread reply stays visible).
         init?(_ sessions: [Session]) {
             if sessions.contains(where: \.unread) {
                 self = .unread
@@ -389,7 +390,6 @@ extension VerticalTabs.Agent {
         var details: [String]
         /// The highest-priority split's session.
         var primaryKey: String
-        var edge: EdgeMark?
     }
 
     static func date(ms: Int64?) -> Date? {
@@ -469,8 +469,7 @@ extension VerticalTabs.Agent {
                 progress: note?.progress,
                 jobs: jobs.count),
             details: details,
-            primaryKey: primary.key,
-            edge: EdgeMark(unique))
+            primaryKey: primary.key)
     }
 
     /// Elapsed time for an active turn: `28s`, `2m`, `1h`, `3d`.

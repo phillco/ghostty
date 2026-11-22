@@ -171,17 +171,20 @@ struct VerticalTabsAgentTests {
 
     @Test func edgeBarIsIndependentOfWorkingAndAwaiting() throws {
         // A split still working beside one with an unread reply: dot and bar both.
-        let both = try #require(Agent.summary(of: [session("w", .working), session("u", .idle, unread: true)]))
-        #expect(both.display == .working)
-        #expect(both.edge == .unread)
+        let pair = [session("w", .working), session("u", .idle, unread: true)]
+        #expect(try #require(Agent.summary(of: pair)).display == .working)
+        #expect(Agent.EdgeMark(pair) == .unread)
         var awaiting = session("a", .awaiting)
         awaiting.hasNewActivity = true
-        let asking = try #require(Agent.summary(of: [awaiting]))
-        #expect(asking.display == .awaiting)
-        #expect(asking.edge == .activity)
+        #expect(try #require(Agent.summary(of: [awaiting])).display == .awaiting)
+        #expect(Agent.EdgeMark([awaiting]) == .activity)
         // Unread outranks activity; neither leaves no bar.
-        #expect(try #require(Agent.summary(of: [awaiting, session("u", .idle, unread: true)])).edge == .unread)
-        #expect(try #require(Agent.summary(of: [session("i", .idle)])).edge == nil)
+        #expect(Agent.EdgeMark([awaiting, session("u", .idle, unread: true)]) == .unread)
+        #expect(Agent.EdgeMark([session("i", .idle)]) == nil)
+        // A brief `unknown` status (no summary) keeps an unread reply's bar.
+        let blip = session("u", .unknown, unread: true)
+        #expect(Agent.summary(of: [blip]) == nil)
+        #expect(Agent.EdgeMark([blip]) == .unread)
     }
 
     @Test func activityIndicatorConfigHidesOnlyTheDimBar() {

@@ -167,6 +167,9 @@ enum VerticalTabs {
         var claimedPinKey: String?
         /// Live agent state from `agentd` across this tab's splits; nil without one.
         var agent: Agent.Summary?
+        /// The unread/activity bar, apart from `agent`: it survives an
+        /// `unknown` status, which yields no summary.
+        var agentEdge: Agent.EdgeMark?
 
         /// The key a new pin for this tab is stored under.
         var pinKey: String? { surfaceIDs.first }

@@ -202,11 +202,13 @@ final class VerticalTabsGroupHost {
             let surfaces = controller.map { Array($0.surfaceTree) } ?? []
             let pwd = controller?.focusedSurface?.pwd ?? surfaces.first?.pwd
             var agent: VerticalTabs.Agent.Summary?
+            var agentEdge: VerticalTabs.Agent.EdgeMark?
             if !agents.isEmpty, let controller {
                 let sessions = Self.orderedSurfaces(controller).compactMap {
                     agents.session(for: Self.agentTerminal($0))
                 }
                 agent = VerticalTabs.Agent.summary(of: sessions)
+                agentEdge = VerticalTabs.Agent.EdgeMark(sessions)
             }
             return VerticalTabs.Tab(
                 id: ObjectIdentifier(window),
@@ -219,7 +221,8 @@ final class VerticalTabsGroupHost {
                 lastLeft: tracker.lastLeft,
                 lastActive: tracker.shownActive,
                 claimedPinKey: tracker.claimedPinKey,
-                agent: agent
+                agent: agent,
+                agentEdge: agentEdge
             )
         }
 
@@ -262,7 +265,7 @@ final class VerticalTabsGroupHost {
                     isPinned: pinned,
                     status: tab.agent?.display,
                     awaitingKind: tab.agent?.awaitingKind ?? "",
-                    edge: tab.agent?.edge,
+                    edge: tab.agentEdge,
                     badge: tab.agent?.badge ?? .init(),
                     details: tab.agent?.details ?? []
                 )
