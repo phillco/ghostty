@@ -92,8 +92,8 @@ enum AgComposerKeys {
     }
 }
 
-/// A brief "Copied" label over the surface. A borderless, click-through child panel that
-/// never becomes key, so it can't take focus.
+/// A brief "Copied" label by the mouse (see `CopyToastLayout`). A borderless,
+/// click-through child panel that never becomes key, so it can't take focus.
 @MainActor
 enum CopyToast {
     private static var panel: NSPanel?
@@ -115,9 +115,13 @@ enum CopyToast {
         label.frame.origin = NSPoint(x: 14, y: 7)
         effect.addSubview(label)
 
-        let rect = view.convert(view.bounds, to: nil)
-        let screenRect = window.convertToScreen(rect)
-        let origin = NSPoint(x: screenRect.midX - size.width / 2, y: screenRect.minY + 24)
+        let viewRect = window.convertToScreen(view.convert(view.bounds, to: nil))
+        let cursor = NSEvent.mouseLocation
+        let cursorScreen = CopyToastLayout.anchorsToCursor(cursor, viewRect: viewRect)
+            ? NSScreen.screens.first { $0.frame.contains(cursor) } : nil
+        let screen = cursorScreen ?? window.screen ?? NSScreen.main
+        let origin = CopyToastLayout.origin(for: size, cursor: cursor, viewRect: viewRect,
+                                            screenFrame: screen?.visibleFrame ?? viewRect)
 
         panel?.parent?.removeChildWindow(panel!)
         panel?.orderOut(nil)
