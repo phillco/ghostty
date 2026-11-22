@@ -381,13 +381,13 @@ private struct VerticalTabRowView: View {
     }
 
     private var fittingCompact: some View {
+        // A readable start of the title (`titleMinWidth`) outranks every
+        // accessory, the icon included; only the last fallback lets it shrink.
         let keep = style.metrics.titleMinWidth
-        // Room for a letter and an ellipsis before the icon goes.
-        let glimpse = style.fontSize
         return ViewThatFits(in: .horizontal) {
             if folder != nil { compactRow(pill: true, age: true, titleMin: keep, measured: keep) }
             compactRow(pill: false, age: true, titleMin: keep, measured: keep)
-            compactRow(pill: false, age: false, titleMin: 0, measured: glimpse)
+            compactRow(pill: false, age: false, titleMin: 0, measured: keep)
             if style.showIcons { compactRow(pill: false, age: false, titleMin: 0, measured: 0, icon: false) }
         }
     }
