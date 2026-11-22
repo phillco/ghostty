@@ -2608,7 +2608,10 @@ fn semanticCopyBuild(
     const json_z = try self.alloc.dupeSentinel(u8, json, 0);
     errdefer self.alloc.free(json_z);
 
-    const html: ?[:0]const u8 = if (copy_nav.selectionHasCopyLinks(screen, sel)) null else html: {
+    // No terminal HTML for an explicit Markdown copy (it should paste as
+    // Markdown) or when chips would turn into links.
+    const html: ?[:0]const u8 = if (format == .markdown or
+        copy_nav.selectionHasCopyLinks(screen, sel)) null else html: {
         var hw: std.Io.Writer.Allocating = .init(self.alloc);
         defer hw.deinit();
         // As for the mixed format: no codepoint map, no default colors.
@@ -6348,6 +6351,18 @@ pub fn completeClipboardRequest(
         },
 
         .kitty_write => |kitty| {
+            // A write made only of reserved types (see the filter below) is
+            // refused before any prompt or remembered grant, and leaves the
+            // clipboard alone.
+            if (kitty.contents.len > 0) refuse: {
+                for (kitty.contents) |c| {
+                    if (!copy_nav.isReservedMime(c.mime)) break :refuse;
+                }
+                defer kitty.destroy();
+                try self.kittyClipboardStatus(.write, kitty.id, kitty.terminator, .EPERM);
+                return;
+            }
+
             // If we need confirmation we return an error without
             // consuming the request state; the apprt keeps it alive
             // for the confirmation flow. A session grant carried by
@@ -6388,12 +6403,6 @@ pub fn completeClipboardRequest(
             for (kitty.contents) |c| {
                 if (copy_nav.isReservedMime(c.mime)) continue;
                 try allowed.append(self.alloc, c);
-            }
-            // A write made only of reserved types is refused, leaving the
-            // clipboard alone; only a truly empty commit clears it.
-            if (kitty.contents.len > 0 and allowed.items.len == 0) {
-                try self.kittyClipboardStatus(.write, kitty.id, kitty.terminator, .EPERM);
-                return;
             }
             self.rt_surface.setClipboard(
                 kitty.location,
