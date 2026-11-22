@@ -34,6 +34,15 @@ pub fn isMsgUri(uri: []const u8) bool {
     return std.mem.startsWith(u8, uri[scheme.len..], "msg?");
 }
 
+/// A msg anchor landmark: a msg URI that isn't a navigation link to one
+/// (`scroll=1`, as printed by `/jump` or outlines). Only anchors locate
+/// messages; matching a link would find the link itself.
+pub fn isAnchorUri(uri: []const u8) bool {
+    if (!isMsgUri(uri)) return false;
+    const scroll = queryValue(uri, "scroll") orelse return true;
+    return !std.mem.eql(u8, scroll, "1");
+}
+
 /// Value of query item `name` in `uri`, undecoded. Producers emit hex, ints
 /// and UUIDs, so raw comparison is exact.
 pub fn queryValue(uri: []const u8, name: []const u8) ?[]const u8 {
@@ -64,7 +73,7 @@ fn rowMsgUri(page: *const Page, y: usize, filter: anytype) ?[]const u8 {
         if (!cell.hyperlink) continue;
         const id = page.lookupHyperlink(cell) orelse continue;
         const uri = page.hyperlink_set.get(page.memory, id).uri.slice(page.memory);
-        if (isMsgUri(uri) and filter.matches(uri)) return uri;
+        if (isAnchorUri(uri) and filter.matches(uri)) return uri;
     }
     return null;
 }
@@ -193,7 +202,7 @@ pub fn findAnchor(alloc: Allocator, screen: *Screen, q: Query) Allocator.Error!?
                 if (!cell.hyperlink) continue;
                 const id = page.lookupHyperlink(cell) orelse continue;
                 const uri = page.hyperlink_set.get(page.memory, id).uri.slice(page.memory);
-                if (!isMsgUri(uri)) continue;
+                if (!isAnchorUri(uri)) continue;
                 const pin: Pin = .{ .node = node, .y = @intCast(y) };
                 if (q.matchesPair(.display, uri)) return pin;
                 if (durable == null and q.matchesPair(.durable, uri)) durable = pin;
@@ -331,6 +340,8 @@ test "copy_nav: msg uri and query parsing" {
     try testing.expect(isMsgUri("Ghostty-Phil://msg?seg=3"));
     try testing.expect(!isMsgUri("ghostty-phil://copy?seg=3"));
     try testing.expect(!isMsgUri("https://msg?seg=3"));
+    try testing.expect(isAnchorUri("ghostty-phil://msg?gen=ab&seg=3&scroll=0"));
+    try testing.expect(!isAnchorUri("ghostty-phil://msg?gen=ab&seg=3&scroll=1"));
     try testing.expectEqualStrings("3", queryValue("ghostty-phil://msg?gen=ab&seg=3", "seg").?);
     try testing.expectEqual(null, queryValue("ghostty-phil://msg?gen=ab&segx=3", "seg"));
 
@@ -418,6 +429,12 @@ test "copy_nav: scrollToAnchor scrolls viewport to the matching anchor" {
 
     try testing.expect(!try scrollToAnchor(testing.allocator, screen, "ghostty-phil://msg?gen=ab&seg=9"));
     try testing.expect(!try scrollToAnchor(testing.allocator, screen, "ghostty-phil://copy?gen=ab&seg=1"));
+
+    // A navigation link to seg 1 printed below doesn't count as its anchor.
+    screen.scroll(.active);
+    s.nextSlice("\r\n\x1b]8;;ghostty-phil://msg?gen=ab&seg=1&scroll=1\x1b\\[jump]\x1b]8;;\x1b\\");
+    try testing.expect(try scrollToAnchor(testing.allocator, screen, "ghostty-phil://msg?gen=ab&seg=1&scroll=1"));
+    try testing.expectEqual(@as(u32, 0), screen.pages.pointFromPin(.screen, screen.pages.getTopLeft(.viewport)).?.coord().y);
 
     // Exact display match beats a newer durable match; a stale gen falls back.
     const both = Query.parse("ghostty-phil://msg?gen=ab&seg=1&sid=S&rec=R2").?;

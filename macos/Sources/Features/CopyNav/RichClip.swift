@@ -40,6 +40,8 @@ struct RichClip: Equatable {
         let all = NSRange(location: 0, length: attr.length)
         attr.removeAttribute(.foregroundColor, range: all)
         attr.removeAttribute(.backgroundColor, range: all)
+        attr.removeAttribute(.strokeColor, range: all)
+        attr.removeAttribute(.strokeWidth, range: all)
         return try? attr.data(from: all, documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
     }
 
@@ -68,8 +70,10 @@ enum CopyPasteboard {
     /// `changeCount` (a newer copy wins). Pass nil to write unconditionally.
     @discardableResult
     static func commit(_ clip: RichClip, to pasteboard: NSPasteboard, ifUnchangedSince changeCount: Int?) -> Bool {
+        // Build first (RTF conversion takes a while), then check and write back to back.
+        let item = clip.pasteboardItem()
         if let changeCount, pasteboard.changeCount != changeCount { return false }
         pasteboard.clearContents()
-        return pasteboard.writeObjects([clip.pasteboardItem()])
+        return pasteboard.writeObjects([item])
     }
 }

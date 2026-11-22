@@ -62,7 +62,8 @@ zig build test -Demit-macos-app=false -Demit-xcframework=false \
   -Dtest-filter=input.Binding -Dtest-filter=apprt.action \
   -Dtest-filter='scroll-to-bottom paste defaults' \
   -Dtest-filter='embedded key event preserves viewport' \
-  -Dtest-filter='macOS split promotion shortcuts' -Dtest-filter=input.command
+  -Dtest-filter='macOS split promotion shortcuts' -Dtest-filter=input.command \
+  -Dtest-filter=copy_nav
 python3 test/fork/standalone-swift.py -j 4
 ```
 

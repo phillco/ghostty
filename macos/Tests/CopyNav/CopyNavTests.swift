@@ -43,6 +43,10 @@ struct PhilLinkTests {
         #expect(!copy.allowed(from: .externalOpen))
         #expect(copy.allowed(from: .surfaceClick))
         #expect(msg.allowed(from: .externalOpen))
+        // Malformed copy links are still ours to refuse, not passed to other openers.
+        #expect(PhilLink.isOurs("ghostty-phil://copy?text=hi", schemes: schemes))
+        #expect(!PhilLink.isOurs("ghostty-phil://focus?tty=x", schemes: schemes))
+        #expect(!PhilLink.isOurs("https://copy?x", schemes: schemes))
     }
 }
 
@@ -310,7 +314,7 @@ struct RichClipTests {
         let rtf = try #require(RichClip(response(kind: "prose", markdown: "# Head\n\n**bold** `c`")).rtf())
         let text = try #require(String(bytes: rtf, encoding: .ascii))
         #expect(text.hasPrefix("{\\rtf"))
-        #expect(!text.contains("\\cf1") && !text.contains("\\cb1"))
+        #expect(!text.contains("\\cf1") && !text.contains("\\cb1") && !text.contains("\\strokec"))
         #expect(text.contains("bold"))
     }
 

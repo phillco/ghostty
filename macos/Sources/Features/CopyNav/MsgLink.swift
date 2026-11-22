@@ -11,7 +11,11 @@ import GhosttyKit
 enum MsgLink {
     /// An OSC 8 click in `view`. False when `url` isn't one of these links.
     static func handleClick(_ url: String, view: Ghostty.SurfaceView?) -> Bool {
-        guard let link = PhilLink.parse(url, schemes: FocusLink.schemes) else { return false }
+        guard PhilLink.isOurs(url, schemes: FocusLink.schemes) else { return false }
+        guard let link = PhilLink.parse(url, schemes: FocusLink.schemes) else {
+            NSSound.beep()
+            return true
+        }
         guard let view else {
             CopyProvider.logger.info("ignored copy/msg link without an originating surface")
             return true
@@ -36,7 +40,8 @@ enum MsgLink {
 
     /// A Launch Services open. Copy links are dropped; msg links navigate.
     static func handleExternal(_ url: String) -> Bool {
-        guard let link = PhilLink.parse(url, schemes: FocusLink.schemes) else { return false }
+        guard PhilLink.isOurs(url, schemes: FocusLink.schemes) else { return false }
+        guard let link = PhilLink.parse(url, schemes: FocusLink.schemes) else { return true }
         guard link.allowed(from: .externalOpen) else {
             CopyProvider.logger.info("ignored external copy link")
             return true

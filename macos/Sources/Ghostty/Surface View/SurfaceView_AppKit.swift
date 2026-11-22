@@ -1418,11 +1418,6 @@ extension Ghostty {
                 return false
             }
 
-            // ⌘C with no selection and ⌘X edit ag's composer draft.
-            if AgComposerKeys.handle(event, view: self) {
-                return true
-            }
-
             // Get information about if this is a binding.
             let bindingFlags = surfaceModel.flatMap { surface in
                 var ghosttyEvent = event.ghosttyKeyEvent(GHOSTTY_ACTION_PRESS)
@@ -1430,6 +1425,14 @@ extension Ghostty {
                     ghosttyEvent.text = ptr
                     return surface.keyIsBinding(ghosttyEvent)
                 }
+            }
+
+            // ⌘C with no selection and ⌘X edit ag's composer draft, unless a binding that
+            // always applies (not just a performable copy) or a sequence/table owns the key.
+            if keySequence.isEmpty, keyTables.isEmpty,
+               bindingFlags.map({ $0.contains(.performable) }) ?? true,
+               AgComposerKeys.handle(event, view: self) {
+                return true
             }
 
             // If this is a binding then we want to perform it.

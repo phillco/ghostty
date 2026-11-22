@@ -63,6 +63,14 @@ enum PhilLink: Equatable {
         }
     }
 
+    /// A `copy` or `msg` link in one of our schemes, valid or not. Malformed ones (such as
+    /// inline `text=` copies) are claimed and refused rather than offered to other openers.
+    static func isOurs(_ string: String, schemes: Set<String>) -> Bool {
+        guard let c = URLComponents(string: string), let scheme = c.scheme?.lowercased(),
+              schemes.contains(scheme) else { return false }
+        return ["copy", "msg"].contains(c.host?.lowercased() ?? "")
+    }
+
     enum Origin { case surfaceClick, externalOpen }
 
     /// Copy links write the clipboard, so only clicks inside a surface may run them;
