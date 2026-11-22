@@ -1143,6 +1143,11 @@ pub const Action = union(enum) {
         /// what is best when pasting.
         mixed,
 
+        /// Like mixed, but when the selection resolves to Markdown (macOS
+        /// semantic copy from `ag`), the plain-text flavor is the raw
+        /// Markdown. Otherwise copies plain text.
+        markdown,
+
         pub const default: CopyToClipboard = .mixed;
     };
 

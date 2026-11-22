@@ -1268,6 +1268,7 @@ GHOSTTY_API void ghostty_surface_split_resize(ghostty_surface_t,
                                                  uint16_t);
 GHOSTTY_API void ghostty_surface_split_equalize(ghostty_surface_t);
 GHOSTTY_API bool ghostty_surface_binding_action(ghostty_surface_t, const char*, uintptr_t);
+GHOSTTY_API bool ghostty_surface_scroll_to_anchor(ghostty_surface_t, const char*, uintptr_t);
 GHOSTTY_API void ghostty_surface_complete_clipboard_request(
     ghostty_surface_t,
     const ghostty_clipboard_complete_s*,

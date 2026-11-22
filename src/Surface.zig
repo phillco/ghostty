@@ -37,6 +37,7 @@ const App = @import("App.zig");
 const internal_os = @import("os/main.zig");
 const inspectorpkg = @import("inspector/main.zig");
 const SurfaceMouse = @import("surface_mouse.zig");
+const copy_nav = @import("copy_nav.zig");
 const ProcessInfo = @import("pty.zig").ProcessInfo;
 
 const log = std.log.scoped(.surface);
@@ -2424,7 +2425,8 @@ fn copySelectionToClipboards(
     var contents_buf: [2]apprt.ClipboardContent = undefined;
     var contents: std.ArrayList(apprt.ClipboardContent) = .initBuffer(&contents_buf);
     switch (format) {
-        .plain => {
+        // Markdown only exists via the semantic copy path; plain otherwise.
+        .plain, .markdown => {
             var formatter: ScreenFormatter = .init(self.io.terminal.screens.active, opts);
             formatter.content = .{ .selection = sel };
             try formatter.format(&aw.writer);
@@ -2514,6 +2516,69 @@ fn copySelectionToClipboards(
             .{ clipboard, err },
         );
     };
+}
+
+const SemanticCopy = struct {
+    plain: [:0]const u8,
+    json: [:0]const u8,
+
+    fn deinit(self: SemanticCopy, alloc: Allocator) void {
+        alloc.free(self.plain);
+        alloc.free(self.json);
+    }
+};
+
+/// Snapshot for macOS semantic copy (see copy_nav.zig): null unless this is
+/// an explicit rich copy (`mixed`/`markdown`) of a non-rectangular selection
+/// below a `ghostty-phil://msg` anchor. Copy-on-select, OSC 52 and the other
+/// formats never get here. Must be called with the renderer mutex held.
+fn semanticCopySnapshot(
+    self: *Surface,
+    sel: terminal.Selection,
+    format: input.Binding.Action.CopyToClipboard,
+) !?SemanticCopy {
+    if (comptime apprt.runtime != apprt.embedded) return null;
+    if (format != .mixed and format != .markdown) return null;
+    if (sel.rectangle) return null;
+
+    const screen = self.io.terminal.screens.active;
+    var aw: std.Io.Writer.Allocating = .init(self.alloc);
+    defer aw.deinit();
+    var formatter: terminal.formatter.ScreenFormatter = .init(screen, .{
+        .emit = .plain,
+        .unwrap = true,
+        .trim = self.config.clipboard_trim_trailing_spaces,
+        .codepoint_map = self.config.clipboard_codepoint_map.map.list,
+    });
+    formatter.content = .{ .selection = sel };
+    try formatter.format(&aw.writer);
+    const plain = try aw.toOwnedSliceSentinel(0);
+    errdefer self.alloc.free(plain);
+
+    const json = try copy_nav.snapshotJson(
+        self.alloc,
+        screen,
+        sel,
+        plain,
+        if (format == .markdown) .markdown else .rich,
+    ) orelse {
+        self.alloc.free(plain);
+        return null;
+    };
+    defer self.alloc.free(json);
+    return .{ .plain = plain, .json = try self.alloc.dupeZ(u8, json) };
+}
+
+/// Scrolls to the `ghostty-phil://msg` anchor matching `uri` (by gen+seg or
+/// sid+rec). Returns false if it isn't within the bounded scan.
+pub fn scrollToAnchor(self: *Surface, uri: []const u8) bool {
+    {
+        self.renderer_state.mutex.lockUncancelable(global.io());
+        defer self.renderer_state.mutex.unlock(global.io());
+        if (!copy_nav.scrollToAnchor(self.io.terminal.screens.active, uri)) return false;
+    }
+    self.queueRender() catch |err| log.warn("queueRender after anchor scroll err={}", .{err});
+    return true;
 }
 
 /// Set the active selection and notify the apprt on a genuine state
@@ -5237,11 +5302,20 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
         },
 
         .copy_to_clipboard => |format| {
+            // Semantic copy snapshot, owned, delivered after unlocking.
+            var semantic: ?SemanticCopy = null;
+            defer if (semantic) |v| v.deinit(self.alloc);
+
             self.renderer_state.mutex.lockUncancelable(global.io());
-            defer self.renderer_state.mutex.unlock(global.io());
+            var locked = true;
+            defer if (locked) self.renderer_state.mutex.unlock(global.io());
 
             if (self.io.terminal.screens.active.selection) |sel| {
-                try self.copySelectionToClipboards(
+                semantic = self.semanticCopySnapshot(sel, format) catch |err| semantic: {
+                    log.warn("semantic copy snapshot failed err={}", .{err});
+                    break :semantic null;
+                };
+                if (semantic == null) try self.copySelectionToClipboards(
                     sel,
                     &.{.standard},
                     format,
@@ -5257,6 +5331,17 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
                         log.warn("failed to clear selection after copy err={}", .{err});
                     }
                 }
+
+                // Hand off with the lock released: the apprt resolves the
+                // snapshot asynchronously and must not hold up the terminal.
+                self.renderer_state.mutex.unlock(global.io());
+                locked = false;
+                if (semantic) |v| self.rt_surface.setClipboard(.standard, &.{
+                    .{ .mime = "text/plain", .data = v.plain },
+                    .{ .mime = copy_nav.snapshot_mime, .data = v.json },
+                }, false) catch |err| {
+                    log.err("error setting semantic clipboard err={}", .{err});
+                };
 
                 return true;
             }

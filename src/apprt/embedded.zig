@@ -2527,6 +2527,17 @@ pub const CAPI = struct {
     }
 
     /// Invoke an action on the surface.
+    /// Scroll to the `ghostty-phil://msg` anchor matching the given URI
+    /// (gen+seg or sid+rec). Returns false if no anchor matches within the
+    /// bounded scan.
+    export fn ghostty_surface_scroll_to_anchor(
+        ptr: *Surface,
+        uri_ptr: [*]const u8,
+        uri_len: usize,
+    ) bool {
+        return ptr.core_surface.scrollToAnchor(uri_ptr[0..uri_len]);
+    }
+
     export fn ghostty_surface_binding_action(
         ptr: *Surface,
         action_ptr: [*]const u8,

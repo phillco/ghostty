@@ -166,6 +166,10 @@ fn actionCommands(action: Action.Key) []const Command {
             .action = .{ .copy_to_clipboard = .html },
             .title = i18n.N_("Copy Selection as HTML to Clipboard"),
             .description = i18n.N_("Copy the selected text as HTML to the clipboard."),
+        }, .{
+            .action = .{ .copy_to_clipboard = .markdown },
+            .title = i18n.N_("Copy Selection as Markdown to Clipboard"),
+            .description = i18n.N_("Copy the selected text as Markdown when its source provides it, otherwise as plain text."),
         } },
 
         .copy_url_to_clipboard => comptime &.{.{
