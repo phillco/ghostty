@@ -15,6 +15,14 @@ const Screen = terminal.Screen;
 /// MIME type of the snapshot handed to the apprt alongside `text/plain`.
 pub const snapshot_mime = "application/vnd.ghostty-phil.copy-snapshot+json";
 
+/// MIME types only the core may emit. Clipboard writes carrying
+/// application-chosen types (Kitty clipboard protocol) drop them, so the
+/// apprt can trust a snapshot came from an explicit user copy.
+pub fn isReservedMime(mime: []const u8) bool {
+    const prefix = "application/vnd.ghostty-phil.";
+    return mime.len >= prefix.len and std.ascii.eqlIgnoreCase(mime[0..prefix.len], prefix);
+}
+
 /// Upward anchor scans stop after this many rows or distinct pages, so a
 /// copy never decompresses much cold scrollback under the lock.
 pub const scan_max_rows = 1500;
@@ -205,7 +213,11 @@ pub fn findAnchor(alloc: Allocator, screen: *Screen, q: Query) Allocator.Error!?
                 if (!isAnchorUri(uri)) continue;
                 const pin: Pin = .{ .node = node, .y = @intCast(y) };
                 if (q.matchesPair(.display, uri)) return pin;
-                if (durable == null and q.matchesPair(.durable, uri)) durable = pin;
+                if (durable == null and q.matchesPair(.durable, uri)) {
+                    // Nothing better to look for: stop at the newest hit.
+                    if (!q.has(.display)) return pin;
+                    durable = pin;
+                }
             }
         }
     }
@@ -242,6 +254,26 @@ const Snapshot = struct {
     selectedPlain: []const u8,
 };
 
+/// True if any row of `sel` holds a `ghostty-phil://copy` chip. Call only
+/// for selections already formatted (their pages are resident anyway).
+pub fn selectionHasCopyLinks(screen: *Screen, sel: terminal.Selection) bool {
+    const ordered = sel.ordered(screen, .forward);
+    var it = ordered.start().rowIterator(.right_down, ordered.end());
+    while (it.next()) |p| {
+        const rac = p.rowAndCell();
+        if (!rac.row.hyperlink) continue;
+        const page = p.node.page();
+        for (page.getCells(rac.row)) |*cell| {
+            if (!cell.hyperlink) continue;
+            const id = page.lookupHyperlink(cell) orelse continue;
+            const uri = page.hyperlink_set.get(page.memory, id).uri.slice(page.memory);
+            if (uri.len >= scheme.len + 5 and std.ascii.eqlIgnoreCase(uri[0..scheme.len], scheme) and
+                std.mem.startsWith(u8, uri[scheme.len..], "copy?")) return true;
+        }
+    }
+    return false;
+}
+
 /// The anchor an explicit copy of `sel` resolves against, or null when the
 /// selection isn't eligible (rectangular, or no msg anchor within budget).
 /// Cheap enough to check before formatting the selection.
@@ -262,11 +294,16 @@ pub fn snapshotJson(
     flavor: Flavor,
 ) Allocator.Error!?[]u8 {
     const ordered = sel.ordered(screen, .forward);
-    const top = ordered.start();
-    // Like the unwrapping plain formatter: an end on a spacer head includes
-    // the wide char wrapped onto the next row.
+    // Align ends to whole wide chars like the plain formatter, so the
+    // columns describe exactly the cells in `plain`: a start on a spacer
+    // tail includes its wide char, an end on a spacer head includes the
+    // wide char wrapped onto the next row, and an end on a wide char
+    // includes its tail.
+    var top = ordered.start();
+    if (top.x > 0 and top.rowAndCell().cell.wide == .spacer_tail) top = top.left(1);
     var bot = ordered.end();
     if (bot.rowAndCell().cell.wide == .spacer_head) bot = bot.rightWrap(1) orelse bot;
+    if (bot.rowAndCell().cell.wide == .wide and bot.x + 1 < bot.node.page().size.cols) bot = bot.right(1);
 
     const pages = &screen.pages;
     const anchor_y = (pages.pointFromPin(.screen, anchor.pin) orelse return null).coord().y;
@@ -284,10 +321,15 @@ pub fn snapshotJson(
     var node_: ?*Node = anchor.pin.node;
     var y: usize = anchor.pin.y;
     var rel: u32 = 0;
+    var walked_pages: usize = 0;
     outer: while (node_) |node| : ({
         node_ = node.next;
         y = 0;
     }) {
+        // Bounded like the anchor search: a selection reaching too far
+        // below its anchor copies as plain text instead.
+        walked_pages += 1;
+        if (walked_pages > scan_max_pages) return null;
         var preserved = try node.pagePreservingState(alloc);
         defer preserved.deinit();
         const page = preserved.page();
@@ -295,6 +337,7 @@ pub fn snapshotJson(
             y += 1;
             rel += 1;
         }) {
+            if (rel >= scan_max_rows) return null;
             try wraps.append(a, page.getRow(y).wrap_continuation);
             if (rel > 0 and spanned.items.len < max_spanned) {
                 if (rowMsgUri(page, y, any_msg)) |uri| try spanned.append(a, .{
@@ -486,5 +529,62 @@ test "copy_nav: selection ending on a spacer head includes the wrapped wide char
     try testing.expectEqual(terminal.Cell.Wide.spacer_head, br.rowAndCell().cell.wide);
     const json = (try testSnapshot(screen, .init(tl, br, false), "1A\u{26A1}")).?;
     defer testing.allocator.free(json);
-    try testing.expect(std.mem.indexOf(u8, json, "\"endRow\":2,\"endCol\":0,") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"endRow\":2,\"endCol\":1,") != null);
+}
+
+test "copy_nav: selection reaching too far below its anchor gets no snapshot" {
+    var t = try testTerm(10, 5);
+    defer t.deinit(testing.allocator);
+    var s = t.vtStream();
+    defer s.deinit();
+    s.nextSlice("\x1b]8;;ghostty-phil://msg?gen=ab&seg=1\x1b\\*\x1b]8;;\x1b\\\r\n");
+    for (0..scan_max_rows + 10) |_| s.nextSlice("x\r\n");
+    const screen = t.screens.active;
+    const near = screen.pages.pin(.{ .screen = .{ .y = 1 } }).?;
+    // Ends within the cap: snapshot.
+    const ok_end = screen.pages.pin(.{ .screen = .{ .y = 100 } }).?;
+    const json = (try testSnapshot(screen, .init(near, ok_end, false), "p")).?;
+    testing.allocator.free(json);
+    // Ends past the cap: none, though the anchor is close to the start.
+    const far_end = screen.pages.pin(.{ .screen = .{ .y = scan_max_rows + 5 } }).?;
+    try testing.expectEqual(null, try testSnapshot(screen, .init(near, far_end, false), "p"));
+}
+
+test "copy_nav: wide chars at selection ends are whole" {
+    var t = try testTerm(10, 5);
+    defer t.deinit(testing.allocator);
+    var s = t.vtStream();
+    defer s.deinit();
+    s.nextSlice("\x1b]8;;ghostty-phil://msg?gen=ab&seg=1\x1b\\*\x1b]8;;\x1b\\\r\n");
+    // Row 1: a 漢 b 字 → cols: a=0, 漢=1-2, b=3, 字=4-5.
+    s.nextSlice("a\u{6F22}b\u{5B57}");
+    const screen = t.screens.active;
+    // Start on 漢's tail (col 2), end on 字's head (col 4).
+    const tl = screen.pages.pin(.{ .screen = .{ .x = 2, .y = 1 } }).?;
+    const br = screen.pages.pin(.{ .screen = .{ .x = 4, .y = 1 } }).?;
+    const json = (try testSnapshot(screen, .init(tl, br, false), "\u{6F22}b\u{5B57}")).?;
+    defer testing.allocator.free(json);
+    try testing.expect(std.mem.indexOf(u8, json, "\"startRow\":1,\"startCol\":1,\"endRow\":1,\"endCol\":5,") != null);
+}
+
+test "copy_nav: copy chips in a selection are detected" {
+    var t = try testTerm(20, 5);
+    defer t.deinit(testing.allocator);
+    var s = t.vtStream();
+    defer s.deinit();
+    s.nextSlice("plain row\r\n");
+    s.nextSlice("x \x1b]8;;Ghostty-Phil://copy?pid=1&gen=ab&seg=1\x1b\\[copy]\x1b]8;;\x1b\\");
+    const screen = t.screens.active;
+    const r0 = screen.pages.pin(.{ .screen = .{ .y = 0 } }).?;
+    const r0e = screen.pages.pin(.{ .screen = .{ .x = 5, .y = 0 } }).?;
+    const r1 = screen.pages.pin(.{ .screen = .{ .x = 3, .y = 1 } }).?;
+    try testing.expect(!selectionHasCopyLinks(screen, .init(r0, r0e, false)));
+    try testing.expect(selectionHasCopyLinks(screen, .init(r0, r1, false)));
+}
+
+test "copy_nav: the snapshot MIME is reserved" {
+    try testing.expect(isReservedMime(snapshot_mime));
+    try testing.expect(isReservedMime("Application/VND.Ghostty-Phil.anything"));
+    try testing.expect(!isReservedMime("text/html"));
+    try testing.expect(!isReservedMime("application/vnd.other"));
 }

@@ -619,17 +619,19 @@ enum MarkdownHTML {
         }
     }
 
+    /// Escapes per Unicode scalar: a `<` followed by a combining mark is one Character
+    /// that compares unequal to "<", so Character-wise escaping would let it through.
     static func escape(_ s: String) -> String {
         var out = ""
-        out.reserveCapacity(s.count)
-        for ch in s {
-            switch ch {
+        out.reserveCapacity(s.utf8.count)
+        for scalar in s.unicodeScalars {
+            switch scalar {
             case "&": out += "&amp;"
             case "<": out += "&lt;"
             case ">": out += "&gt;"
             case "\"": out += "&quot;"
             case "'": out += "&#39;"
-            default: out.append(ch)
+            default: out.unicodeScalars.append(scalar)
             }
         }
         return out

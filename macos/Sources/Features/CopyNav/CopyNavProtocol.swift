@@ -208,11 +208,14 @@ enum ClarcReady {
 
     /// `pid`'s endpoint if its `.ready` is ours, whatever its tty, for navigation (which
     /// only uses the tty to find the terminal).
-    static func endpoint(pid: Int32) -> ClarcEndpoint? {
+    /// With `sid`, the file must also be that session's (a pid can be reused).
+    static func endpoint(pid: Int32, sid: String? = nil) -> ClarcEndpoint? {
         guard let (data, owner) = try? readOwned(readyPath(pid: pid)), owner == getuid(),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tty = json["tty"] as? String else { return nil }
-        return try? check(data: data, ownerUID: owner, myUID: getuid(), pid: pid, tty: tty)
+        guard let e = try? check(data: data, ownerUID: owner, myUID: getuid(), pid: pid, tty: tty) else { return nil }
+        if let sid, e.sid != sid { return nil }
+        return e
     }
 
     /// Our `ag` endpoints whose session is `sid`, for external navigation.
@@ -242,19 +245,10 @@ enum ClarcReady {
                   json["agent"] as? String == "agy",
                   (json["pid"] as? NSNumber)?.int32Value == pid,
                   (json["tty"] as? String).map(bareTTY) == want,
-                  processOwned(pid) else { continue }
+                  ForegroundJob.process(pid)?.isAg == true else { continue }
             return pid
         }
         return nil
-    }
-
-    /// Whether `pid` is a live process of ours (in-process sysctl, no spawn).
-    static func processOwned(_ pid: Int32) -> Bool {
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return false }
-        return info.kp_eproc.e_ucred.cr_uid == getuid()
     }
 
     static func bareTTY(_ tty: String) -> String {
@@ -321,6 +315,8 @@ enum ClarcSocket {
         var pending = Data()
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
         while true {
+            // The deadline covers the whole exchange, even a peer that keeps sending.
+            guard Date() < deadline else { throw CopyNavError.timeout }
             while let nl = pending.firstIndex(of: 0x0A) {
                 let candidate = pending[pending.startIndex..<nl]
                 pending = Data(pending[(nl + 1)...])
@@ -364,5 +360,67 @@ enum CopyResolver {
             throw CopyNavError.rejected(response.reason ?? "empty")
         }
         return response
+    }
+}
+
+/// Process facts from in-process sysctl/libproc calls (no spawning).
+enum ForegroundJob {
+    struct Process {
+        var pid: Int32
+        var pgid: Int32
+        var uid: uid_t
+        var comm: String
+
+        var isAg: Bool { uid == getuid() && comm == "ag" }
+    }
+
+    static func process(_ pid: Int32) -> Process? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        return Process(info)
+    }
+
+    static func group(_ pgid: Int32) -> [Process] {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pgid]
+        var size = 0
+        guard sysctl(&mib, 4, nil, &size, nil, 0) == 0, size > 0 else { return [] }
+        size += 8 * MemoryLayout<kinfo_proc>.stride
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
+        guard sysctl(&mib, 4, &procs, &size, nil, 0) == 0 else { return [] }
+        return procs.prefix(size / MemoryLayout<kinfo_proc>.stride).map(Process.init)
+    }
+
+    /// Path of `pid`'s stdin when it's a file or device (nil for pipes and sockets).
+    static func stdinPath(_ pid: Int32) -> String? {
+        var info = vnode_fdinfowithpath()
+        let size = Int32(MemoryLayout<vnode_fdinfowithpath>.size)
+        guard proc_pidfdinfo(pid, 0, PROC_PIDFDVNODEPATHINFO, &info, size) == size else { return nil }
+        return withUnsafeBytes(of: info.pvip.vip_path) { raw in
+            String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
+        }
+    }
+
+    /// True when `agPID` is an `ag` of ours, it leads or belongs to the terminal's
+    /// foreground process group, and no other process in that group reads the terminal.
+    /// `ag`'s backend adapters share its group on pipes; an external editor it runs
+    /// (Ctrl+G) shares its group and the tty, and must get its keys untouched.
+    static func isOnly(agPID: Int32, foregroundPGID: Int32, tty: String) -> Bool {
+        guard let ag = process(agPID), ag.isAg, ag.pgid == foregroundPGID else { return false }
+        let device = "/dev/" + ClarcReady.bareTTY(tty)
+        return !group(foregroundPGID).contains { $0.pid != agPID && stdinPath($0.pid) == device }
+    }
+}
+
+extension ForegroundJob.Process {
+    init(_ info: kinfo_proc) {
+        var p = info.kp_proc
+        pid = p.p_pid
+        pgid = info.kp_eproc.e_pgid
+        uid = info.kp_eproc.e_ucred.cr_uid
+        comm = withUnsafeBytes(of: &p.p_comm) { raw in
+            String(bytes: raw.prefix { $0 != 0 }, encoding: .utf8) ?? ""
+        }
     }
 }

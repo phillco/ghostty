@@ -10,16 +10,17 @@ struct RichClip: Equatable {
     var markdown: String
     var plain: String
 
-    /// `markdownPlain` is the `copy_to_clipboard:markdown` flavor: plain text carries the
-    /// Markdown. Code selections (`kind == "code"`) always copy the bare code, unfenced.
+    /// `markdownPlain` is the explicit `copy_to_clipboard:markdown` flavor: plain text
+    /// carries the Markdown, fences included. Otherwise code selections (`kind == "code"`)
+    /// copy the bare code, unfenced, and everything else the unwrapped plain text.
     init(_ r: ResolveResponse, markdownPlain: Bool = false) {
         let markdown = r.markdown ?? ""
         self.markdown = markdown
         self.html = "<meta charset=\"utf-8\">" + MarkdownHTML.render(markdown)
-        if r.kind == "code", let code = r.plain {
-            plain = code
-        } else if markdownPlain {
+        if markdownPlain {
             plain = markdown
+        } else if r.kind == "code", let code = r.plain {
+            plain = code
         } else {
             plain = r.plain ?? markdown
         }
@@ -56,24 +57,65 @@ struct RichClip: Equatable {
     }
 }
 
+/// Orders our pasteboard writes. Each copy takes a ticket when it starts; its rich
+/// write lands only if no newer copy of ours has written since and nothing outside
+/// Ghostty has written since its ticket (our own writes don't count against it).
 @MainActor
 enum CopyPasteboard {
-    /// Writes the plain fallback and returns the change count a later rich write must match.
-    @discardableResult
-    static func writePlain(_ text: String, to pasteboard: NSPasteboard) -> Int {
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        return pasteboard.changeCount
+    struct Ticket {
+        let seq: Int
+        let changeCount: Int
+        let pasteboard: NSPasteboard.Name
     }
 
-    /// Replaces our plain fallback with `clip`, unless anything wrote the pasteboard since
-    /// `changeCount` (a newer copy wins). Pass nil to write unconditionally.
+    private struct State {
+        var issued = 0
+        /// Sequence of the newest copy that has written.
+        var written = 0
+        /// Change count right after our latest write.
+        var ourChangeCount: Int?
+    }
+
+    private static var states: [NSPasteboard.Name: State] = [:]
+
+    static func ticket(for pasteboard: NSPasteboard) -> Ticket {
+        var st = states[pasteboard.name] ?? State()
+        st.issued += 1
+        states[pasteboard.name] = st
+        return Ticket(seq: st.issued, changeCount: pasteboard.changeCount, pasteboard: pasteboard.name)
+    }
+
+    /// Writes the fallback for a new copy (plain text, and HTML if given) and returns
+    /// its ticket.
+    static func writePlain(_ text: String, html: String? = nil, to pasteboard: NSPasteboard) -> Ticket {
+        let t = ticket(for: pasteboard)
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        if let html { pasteboard.setString(html, forType: .html) }
+        record(t, pasteboard)
+        return Ticket(seq: t.seq, changeCount: pasteboard.changeCount, pasteboard: t.pasteboard)
+    }
+
+    /// Writes `clip` for the copy holding `ticket`, unless a newer copy of ours already
+    /// wrote or another app wrote the pasteboard since the ticket.
     @discardableResult
-    static func commit(_ clip: RichClip, to pasteboard: NSPasteboard, ifUnchangedSince changeCount: Int?) -> Bool {
+    static func commit(_ clip: RichClip, to pasteboard: NSPasteboard, ticket: Ticket) -> Bool {
         // Build first (RTF conversion takes a while), then check and write back to back.
         let item = clip.pasteboardItem()
-        if let changeCount, pasteboard.changeCount != changeCount { return false }
+        let st = states[pasteboard.name] ?? State()
+        guard ticket.seq >= st.written else { return false }
+        let now = pasteboard.changeCount
+        guard now == ticket.changeCount || now == st.ourChangeCount else { return false }
         pasteboard.clearContents()
-        return pasteboard.writeObjects([item])
+        guard pasteboard.writeObjects([item]) else { return false }
+        record(ticket, pasteboard)
+        return true
+    }
+
+    private static func record(_ t: Ticket, _ pasteboard: NSPasteboard) {
+        var st = states[pasteboard.name] ?? State()
+        st.written = max(st.written, t.seq)
+        st.ourChangeCount = pasteboard.changeCount
+        states[pasteboard.name] = st
     }
 }

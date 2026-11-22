@@ -2529,29 +2529,60 @@ fn copySelectionToClipboards(
 const SemanticCopy = struct {
     plain: [:0]const u8,
     json: [:0]const u8,
+    /// Regular terminal HTML, the fallback if `ag` can't resolve the copy.
+    /// Null when the selection holds copy chips, which it would turn into
+    /// links.
+    html: ?[:0]const u8,
 
     fn deinit(self: SemanticCopy, alloc: Allocator) void {
         alloc.free(self.plain);
         alloc.free(self.json);
+        if (self.html) |h| alloc.free(h);
     }
 };
 
-/// Snapshot for macOS semantic copy (see copy_nav.zig): null unless this is
-/// an explicit rich copy (`mixed`/`markdown`) of a non-rectangular selection
-/// below a `ghostty-phil://msg` anchor. Copy-on-select, OSC 52 and the other
-/// formats never get here. Must be called with the renderer mutex held.
+const SemanticResult = union(enum) {
+    /// Not a semantic copy: use the requested format as usual.
+    none,
+    /// Below an ag anchor but no usable snapshot: copy plain text only, never
+    /// the terminal HTML (it would turn copy chips into links).
+    plain_only,
+    semantic: SemanticCopy,
+};
+
+/// Snapshot for macOS semantic copy (see copy_nav.zig): only for an explicit
+/// rich copy (`mixed`/`markdown`) of a non-rectangular selection below a
+/// `ghostty-phil://msg` anchor. Copy-on-select, OSC 52 and the other formats
+/// never get here. Must be called with the renderer mutex held.
 fn semanticCopySnapshot(
     self: *Surface,
     sel: terminal.Selection,
     format: input.Binding.Action.CopyToClipboard,
-) !?SemanticCopy {
-    if (comptime apprt.runtime != apprt.embedded) return null;
-    if (format != .mixed and format != .markdown) return null;
+) SemanticResult {
+    if (comptime apprt.runtime != apprt.embedded) return .none;
+    if (format != .mixed and format != .markdown) return .none;
     const screen = self.io.terminal.screens.active;
     // Find the anchor before formatting so ordinary copies format only once.
-    const anchor = try copy_nav.selectionAnchor(self.alloc, screen, sel) orelse return null;
+    const anchor = (copy_nav.selectionAnchor(self.alloc, screen, sel) catch |err| {
+        log.warn("semantic copy anchor scan failed err={}", .{err});
+        return .plain_only;
+    }) orelse return .none;
     defer anchor.deinit(self.alloc);
 
+    const v = self.semanticCopyBuild(screen, sel, anchor, format) catch |err| {
+        log.warn("semantic copy snapshot failed err={}", .{err});
+        return .plain_only;
+    };
+    return if (v) |copy| .{ .semantic = copy } else .plain_only;
+}
+
+fn semanticCopyBuild(
+    self: *Surface,
+    screen: *terminal.Screen,
+    sel: terminal.Selection,
+    anchor: copy_nav.Found,
+    format: input.Binding.Action.CopyToClipboard,
+) !?SemanticCopy {
     var aw: std.Io.Writer.Allocating = .init(self.alloc);
     defer aw.deinit();
     var formatter: terminal.formatter.ScreenFormatter = .init(screen, .{
@@ -2577,7 +2608,24 @@ fn semanticCopySnapshot(
         return null;
     };
     defer self.alloc.free(json);
-    return .{ .plain = plain, .json = try self.alloc.dupeSentinel(u8, json, 0) };
+    const json_z = try self.alloc.dupeSentinel(u8, json, 0);
+    errdefer self.alloc.free(json_z);
+
+    const html: ?[:0]const u8 = if (copy_nav.selectionHasCopyLinks(screen, sel)) null else html: {
+        var hw: std.Io.Writer.Allocating = .init(self.alloc);
+        defer hw.deinit();
+        // As for the mixed format: no codepoint map, no default colors.
+        var hf: terminal.formatter.ScreenFormatter = .init(screen, .{
+            .emit = .html,
+            .unwrap = true,
+            .trim = self.config.clipboard_trim_trailing_spaces,
+            .palette = &self.io.terminal.colors.palette.current,
+        });
+        hf.content = .{ .selection = sel };
+        try hf.format(&hw.writer);
+        break :html try hw.toOwnedSliceSentinel(0);
+    };
+    return .{ .plain = plain, .json = json_z, .html = html };
 }
 
 /// Scrolls to the `ghostty-phil://msg` anchor matching `uri` (by gen+seg or
@@ -5326,15 +5374,11 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             defer if (locked) self.renderer_state.mutex.unlock(global.io());
 
             if (self.io.terminal.screens.active.selection) |sel| {
-                semantic = self.semanticCopySnapshot(sel, format) catch |err| semantic: {
-                    log.warn("semantic copy snapshot failed err={}", .{err});
-                    break :semantic null;
-                };
-                if (semantic == null) try self.copySelectionToClipboards(
-                    sel,
-                    &.{.standard},
-                    format,
-                );
+                switch (self.semanticCopySnapshot(sel, format)) {
+                    .none => try self.copySelectionToClipboards(sel, &.{.standard}, format),
+                    .plain_only => try self.copySelectionToClipboards(sel, &.{.standard}, .plain),
+                    .semantic => |v| semantic = v,
+                }
 
                 // Clear the selection if configured to do so.
                 if (self.config.selection_clear_on_copy) {
@@ -5351,7 +5395,11 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
                 // snapshot asynchronously and must not hold up the terminal.
                 self.renderer_state.mutex.unlock(global.io());
                 locked = false;
-                if (semantic) |v| self.rt_surface.setClipboard(.standard, &.{
+                if (semantic) |v| self.rt_surface.setClipboard(.standard, if (v.html) |h| &.{
+                    .{ .mime = "text/plain", .data = v.plain },
+                    .{ .mime = "text/html", .data = h },
+                    .{ .mime = copy_nav.snapshot_mime, .data = v.json },
+                } else &.{
                     .{ .mime = "text/plain", .data = v.plain },
                     .{ .mime = copy_nav.snapshot_mime, .data = v.json },
                 }, false) catch |err| {
@@ -6313,9 +6361,18 @@ pub fn completeClipboardRequest(
             // are only what its confirmation prompt displayed. An
             // empty commit clears the clipboard, which the apprt
             // write API expresses as a single empty text entry.
+            // Application-chosen MIME types never include our reserved
+            // ones: only an explicit copy may hand the apprt a semantic
+            // copy snapshot.
+            var allowed: std.ArrayList(apprt.ClipboardContent) = .empty;
+            defer allowed.deinit(self.alloc);
+            for (kitty.contents) |c| {
+                if (copy_nav.isReservedMime(c.mime)) continue;
+                try allowed.append(self.alloc, c);
+            }
             self.rt_surface.setClipboard(
                 kitty.location,
-                if (kitty.contents.len > 0) kitty.contents else &.{.{
+                if (allowed.items.len > 0) allowed.items else &.{.{
                     .mime = "text/plain",
                     .data = "",
                 }},

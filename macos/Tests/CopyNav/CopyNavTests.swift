@@ -207,6 +207,28 @@ struct ClarcSocketTests {
         #expect(Date().timeIntervalSince(start) < 0.15)
     }
 
+    @Test func chattyPeerStillTimesOut() throws {
+        let ag = try FakeAg(tty: "/dev/ttys099") { _ in
+            Array(repeating: #"{"event":"state","state":{}}"#, count: 20000)
+        }
+        ClarcReady.directory = ag.dir
+        defer { ClarcReady.directory = "/tmp" }
+        let start = Date()
+        #expect(throws: CopyNavError.timeout) {
+            try CopyResolver.resolve(pid: ag.pid, tty: "ttys099", line: Data("{\"id\":\"x\"}\n".utf8), id: "x")
+        }
+        #expect(Date().timeIntervalSince(start) < 0.15)
+    }
+
+    @Test func reusedPidNeedsMatchingSession() throws {
+        let ag = try FakeAg(tty: "/dev/ttys099") { _ in [] }
+        ClarcReady.directory = ag.dir
+        defer { ClarcReady.directory = "/tmp" }
+        #expect(ClarcReady.endpoint(pid: ag.pid)?.tty == "ttys099")
+        #expect(ClarcReady.endpoint(pid: ag.pid, sid: "S1")?.tty == "ttys099")
+        #expect(ClarcReady.endpoint(pid: ag.pid, sid: "other") == nil)
+    }
+
     @Test func rejectedResponsesThrow() throws {
         let ag = try FakeAg(tty: "/dev/ttys099") { _ in [#"{"id":"x","ok":false,"reason":"stale_gen"}"#] }
         ClarcReady.directory = ag.dir
@@ -223,6 +245,15 @@ struct MarkdownHTMLTests {
         let html = MarkdownHTML.render("<script>alert(1)</script>\n\nhi <b>x</b> & `<i>`")
         #expect(!html.contains("<script>") && !html.contains("<b>") && !html.contains("<i>"))
         #expect(html.contains("&lt;script&gt;") && html.contains("&amp;") && html.contains("<code>&lt;i&gt;</code>"))
+    }
+
+    @Test func escapesPerScalar() {
+        // "<" + combining acute is one Character but must still be escaped.
+        #expect(MarkdownHTML.escape("<\u{301}b>\"\u{301}'&") == "&lt;\u{301}b&gt;&quot;\u{301}&#39;&amp;")
+        let html = MarkdownHTML.render("<\u{301}script>x</script> [l](https://a.test/\"\u{301}onmouseover=x)")
+        let scalars = Array(html.unicodeScalars)
+        #expect(!zip(scalars, scalars.dropFirst()).contains { $0 == "<" && $1 == "\u{301}" })
+        #expect(html.contains("https://a.test/&quot;\u{301}onmouseover=x"))
     }
 
     @Test func allowlistsLinkSchemes() {
@@ -304,7 +335,8 @@ struct RichClipTests {
 
     @Test func plainTextIsContentAware() {
         #expect(RichClip(response(kind: "code", plain: "let x = 1")).plain == "let x = 1")
-        #expect(RichClip(response(kind: "code", plain: "let x = 1"), markdownPlain: true).plain == "let x = 1")
+        #expect(RichClip(response(kind: "code", plain: "let x = 1", markdown: "```swift\nlet x = 1\n```"),
+                         markdownPlain: true).plain == "```swift\nlet x = 1\n```")
         #expect(RichClip(response(kind: "prose")).plain == "p")
         #expect(RichClip(response(kind: "prose"), markdownPlain: true).plain == "**m**")
         #expect(RichClip(response(kind: "mixed")).html.contains("<strong>m</strong>"))
@@ -318,23 +350,68 @@ struct RichClipTests {
         #expect(text.contains("bold"))
     }
 
-    @Test func richWriteLosesToNewerCopy() throws {
-        let pb = NSPasteboard(name: .init("io.phillip.ghostty-phil.test.\(UUID().uuidString)"))
-        defer { pb.releaseGlobally() }
-        let clip = RichClip(response(kind: "prose"))
+    private func scratchPasteboard() -> NSPasteboard {
+        NSPasteboard(name: .init("io.phillip.ghostty-phil.test.\(UUID().uuidString)"))
+    }
 
-        let count = CopyPasteboard.writePlain("plain fallback", to: pb)
-        #expect(CopyPasteboard.commit(clip, to: pb, ifUnchangedSince: count))
+    @Test func fallbackThenRichWrite() throws {
+        let pb = scratchPasteboard()
+        defer { pb.releaseGlobally() }
+        let ticket = CopyPasteboard.writePlain("plain fallback", html: "<b>term</b>", to: pb)
+        #expect(pb.string(forType: .html) == "<b>term</b>")
+        #expect(CopyPasteboard.commit(RichClip(response(kind: "prose")), to: pb, ticket: ticket))
         #expect(pb.string(forType: .string) == "p")
         #expect(pb.string(forType: RichClip.markdownType) == "**m**")
         #expect(pb.string(forType: .html)?.contains("<strong>m</strong>") == true)
         #expect(pb.data(forType: .rtf) != nil)
         #expect(pb.pasteboardItems?.count == 1)
+    }
 
-        let stale = CopyPasteboard.writePlain("plain fallback", to: pb)
+    @Test func otherAppsWriteWins() {
+        let pb = scratchPasteboard()
+        defer { pb.releaseGlobally() }
+        let ticket = CopyPasteboard.writePlain("plain fallback", to: pb)
         pb.clearContents()
         pb.setString("newer copy", forType: .string)
-        #expect(!CopyPasteboard.commit(clip, to: pb, ifUnchangedSince: stale))
+        #expect(!CopyPasteboard.commit(RichClip(response(kind: "prose")), to: pb, ticket: ticket))
         #expect(pb.string(forType: .string) == "newer copy")
+    }
+
+    @Test func newestCopyIntentWins() {
+        let pb = scratchPasteboard()
+        defer { pb.releaseGlobally() }
+        let a = RichClip(response(kind: "prose", plain: "A"))
+        let b = RichClip(response(kind: "prose", plain: "B"))
+
+        // A then B clicked; A answers first, then B: B still lands.
+        let ta = CopyPasteboard.ticket(for: pb)
+        let tb = CopyPasteboard.ticket(for: pb)
+        #expect(CopyPasteboard.commit(a, to: pb, ticket: ta))
+        #expect(CopyPasteboard.commit(b, to: pb, ticket: tb))
+        #expect(pb.string(forType: .string) == "B")
+
+        // C then D clicked; D answers first: the late C is dropped.
+        let tc = CopyPasteboard.ticket(for: pb)
+        let td = CopyPasteboard.ticket(for: pb)
+        #expect(CopyPasteboard.commit(b, to: pb, ticket: td))
+        #expect(!CopyPasteboard.commit(a, to: pb, ticket: tc))
+        #expect(pb.string(forType: .string) == "B")
+
+        // A newer selection copy's plain fallback beats an older pending chip.
+        let te = CopyPasteboard.ticket(for: pb)
+        _ = CopyPasteboard.writePlain("selection", to: pb)
+        #expect(!CopyPasteboard.commit(a, to: pb, ticket: te))
+        #expect(pb.string(forType: .string) == "selection")
+    }
+}
+
+struct ForegroundJobTests {
+    @Test func readsOwnProcessAndGroup() throws {
+        let me = try #require(ForegroundJob.process(getpid()))
+        #expect(me.uid == getuid() && me.pgid == getpgrp() && !me.comm.isEmpty)
+        #expect(!me.isAg)
+        #expect(ForegroundJob.group(getpgrp()).contains { $0.pid == getpid() })
+        // Not an ag, so never eligible for composer keys.
+        #expect(!ForegroundJob.isOnly(agPID: getpid(), foregroundPGID: getpgrp(), tty: "ttys000"))
     }
 }

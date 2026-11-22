@@ -9,11 +9,13 @@ enum CopyProvider {
     static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "ghostty", category: "copy-nav")
 
     /// ⌘C on a selection below an `ag` anchor. The core already left the renderer lock.
-    /// The plain text lands immediately; the rich item replaces it only if `ag` answers
-    /// within the budget and nothing else wrote the pasteboard meanwhile. Failures keep the
-    /// plain text: never the terminal HTML, which would turn copy chips into links.
-    static func copySelection(snapshot: Data, plain: String, view: Ghostty.SurfaceView, pasteboard: NSPasteboard) {
-        let changeCount = CopyPasteboard.writePlain(plain, to: pasteboard)
+    /// The regular copy lands immediately: plain text, plus terminal HTML when the
+    /// selection has no copy chips (which it would render as links). The rich item
+    /// replaces it only if `ag` answers within the budget and no newer copy or other app
+    /// wrote the pasteboard meanwhile; otherwise the regular copy stays.
+    static func copySelection(snapshot: Data, plain: String, html: String?, view: Ghostty.SurfaceView,
+                              pasteboard: NSPasteboard) {
+        let ticket = CopyPasteboard.writePlain(plain, html: html, to: pasteboard)
         guard let snap = try? JSONDecoder().decode(SelectionSnapshot.self, from: snapshot) else {
             logger.warning("undecodable copy snapshot")
             return
@@ -23,7 +25,7 @@ enum CopyProvider {
         resolve(pid: pid, view: view, line: line, id: id) { response in
             guard let response else { return }
             CopyPasteboard.commit(RichClip(response, markdownPlain: snap.wantsMarkdownPlain),
-                                  to: pasteboard, ifUnchangedSince: changeCount)
+                                  to: pasteboard, ticket: ticket)
         }
     }
 
@@ -31,11 +33,11 @@ enum CopyProvider {
     /// a toast. Beeps (clipboard untouched) when it can't be verified or resolved.
     static func copyRef(_ ref: CopyRef, view: Ghostty.SurfaceView) {
         let pasteboard = NSPasteboard.general
-        let changeCount = pasteboard.changeCount
+        let ticket = CopyPasteboard.ticket(for: pasteboard)
         let id = UUID().uuidString
         resolve(pid: ref.pid, view: view, line: ResolveRequest.ref(id: id, ref), id: id) { response in
             guard let response,
-                  CopyPasteboard.commit(RichClip(response), to: pasteboard, ifUnchangedSince: changeCount) else {
+                  CopyPasteboard.commit(RichClip(response), to: pasteboard, ticket: ticket) else {
                 NSSound.beep()
                 return
             }
@@ -70,10 +72,12 @@ enum AgComposerKeys {
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function]) == .command,
               let key = event.charactersIgnoringModifiers?.lowercased(), key == "c" || key == "x",
               let surface = view.surface, let model = view.surfaceModel else { return false }
-        if key == "c", ghostty_surface_has_selection(surface) { return false }
-        guard ghostty_surface_kitty_keyboard_flags(surface) == 0,
+        // A terminal selection means the user is copying terminal text, not the draft.
+        guard !ghostty_surface_has_selection(surface),
+              ghostty_surface_kitty_keyboard_flags(surface) == 0,
               let tty = model.ttyName, let pid = ClarcReady.agPID(tty: tty),
-              let fg = model.foregroundPID, fg == Int(pid) || fg == Int(getpgid(pid)) else { return false }
+              let fg = model.foregroundPID,
+              ForegroundJob.isOnly(agPID: pid, foregroundPGID: Int32(fg), tty: tty) else { return false }
         let action = key == "c" ? "text:\\x1b[99;9u" : "text:\\x1b[120;9u"
         return ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
     }

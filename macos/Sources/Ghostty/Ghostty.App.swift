@@ -502,13 +502,16 @@ extension Ghostty {
             assert(contentArray.filter({ $0.mime == "text/plain" }).count <= 1,
                    "clipboard contents should have at most one text/plain entry")
 
-            // Explicit rich copy below an ag anchor: plain now, semantic flavors once ag
-            // resolves the snapshot. Never Ghostty's own HTML for these.
+            // Explicit rich copy below an ag anchor: a regular copy now (the core sends
+            // no terminal HTML if the selection has copy chips), semantic flavors once
+            // ag resolves the snapshot.
             if !confirm, location == GHOSTTY_CLIPBOARD_STANDARD,
                let snapshot = contentArray.first(where: { $0.mime == SelectionSnapshot.mime }),
                let plain = contentArray.first(where: { $0.mime == "text/plain" })?.string {
+                let html = contentArray.first(where: { $0.mime == "text/html" })?.string
                 MainActor.assumeIsolated {
-                    CopyProvider.copySelection(snapshot: snapshot.data, plain: plain, view: surfaceView, pasteboard: pasteboard)
+                    CopyProvider.copySelection(snapshot: snapshot.data, plain: plain, html: html,
+                                               view: surfaceView, pasteboard: pasteboard)
                 }
                 return
             }

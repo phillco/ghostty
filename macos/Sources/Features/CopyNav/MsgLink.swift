@@ -13,7 +13,8 @@ enum MsgLink {
     static func handleClick(_ url: String, view: Ghostty.SurfaceView?) -> Bool {
         guard PhilLink.isOurs(url, schemes: FocusLink.schemes) else { return false }
         guard let link = PhilLink.parse(url, schemes: FocusLink.schemes) else {
-            NSSound.beep()
+            // Called under the renderer lock; beep after.
+            DispatchQueue.main.async { NSSound.beep() }
             return true
         }
         guard let view else {
@@ -59,6 +60,11 @@ enum MsgLink {
                 candidates.append(view)
             }
         }
+        // The session may have ended with its scrollback still open: try every other
+        // terminal last (each scan is bounded).
+        for view in allSurfaces() where !candidates.contains(where: { $0 === view }) {
+            candidates.append(view)
+        }
         for view in candidates {
             guard let surface = view.surface else { continue }
             let found = msg.raw.withCString { ghostty_surface_scroll_to_anchor(surface, $0, UInt(strlen($0))) }
@@ -72,8 +78,15 @@ enum MsgLink {
         if let origin { CopyToast.show("Message not in scrollback", over: origin) }
     }
 
+    private static func allSurfaces() -> [Ghostty.SurfaceView] {
+        NSApp.windows
+            .compactMap { $0.windowController as? BaseTerminalController }
+            .flatMap { $0.surfaceTree.root?.leaves() ?? [] }
+    }
+
     private static func ttys(for msg: MsgRef) -> [String] {
-        if let pid = msg.pid, let endpoint = ClarcReady.endpoint(pid: pid) { return [endpoint.tty] }
+        if let pid = msg.pid, let endpoint = ClarcReady.endpoint(pid: pid, sid: msg.sid) { return [endpoint.tty] }
+        // A reused or stale pid falls through to the session's own endpoints.
         if let sid = msg.sid { return ClarcReady.endpoints(sid: sid).map(\.tty) }
         return []
     }
