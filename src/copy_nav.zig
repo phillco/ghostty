@@ -169,29 +169,38 @@ pub const Query = struct {
     }
 };
 
-const PairFilter = struct {
-    q: Query,
-    pair: Query.Pair,
-
-    fn matches(self: PairFilter, uri: []const u8) bool {
-        return self.q.matchesPair(self.pair, uri);
-    }
-};
-
 /// Newest row carrying an anchor matching `q`, scanning up from the bottom
 /// of the screen within `nav_max_pages`.
 pub fn findAnchor(alloc: Allocator, screen: *Screen, q: Query) Allocator.Error!?Pin {
     const bottom = screen.pages.getBottomRight(.screen) orelse return null;
-    // An exact display match first, then the durable message identity.
-    for ([_]Query.Pair{ .display, .durable }) |pair| {
-        if (!q.has(pair)) continue;
-        const filter: PairFilter = .{ .q = q, .pair = pair };
-        if (try searchUp(alloc, bottom.node, bottom.y, nav_max_pages, null, filter)) |found| {
-            found.deinit(alloc);
-            return found.pin;
+    // One pass: an exact display match wins; otherwise the newest durable
+    // match, so stale display IDs don't make us decode pages twice.
+    var durable: ?Pin = null;
+    var node_: ?*Node = bottom.node;
+    var pages: usize = 0;
+    while (node_) |node| : (node_ = node.prev) {
+        pages += 1;
+        if (pages > nav_max_pages) break;
+        var preserved = try node.pagePreservingState(alloc);
+        defer preserved.deinit();
+        const page = preserved.page();
+        var y: usize = if (node == bottom.node) bottom.y + 1 else page.size.rows;
+        while (y > 0) {
+            y -= 1;
+            const row = page.getRow(y);
+            if (!row.hyperlink) continue;
+            for (page.getCells(row)) |*cell| {
+                if (!cell.hyperlink) continue;
+                const id = page.lookupHyperlink(cell) orelse continue;
+                const uri = page.hyperlink_set.get(page.memory, id).uri.slice(page.memory);
+                if (!isMsgUri(uri)) continue;
+                const pin: Pin = .{ .node = node, .y = @intCast(y) };
+                if (q.matchesPair(.display, uri)) return pin;
+                if (durable == null and q.matchesPair(.durable, uri)) durable = pin;
+            }
         }
     }
-    return null;
+    return durable;
 }
 
 /// Scrolls the viewport so the anchor matching `uri` is at its top. Uses
@@ -396,7 +405,7 @@ test "copy_nav: scrollToAnchor scrolls viewport to the matching anchor" {
     defer s.deinit();
     s.nextSlice("\x1b]8;;ghostty-phil://msg?gen=ab&seg=1&sid=S&rec=R\x1b\\*\x1b]8;;\x1b\\\r\n");
     for (0..20) |_| s.nextSlice("x\r\n");
-    s.nextSlice("\x1b]8;;ghostty-phil://msg?gen=ab&seg=2\x1b\\*\x1b]8;;\x1b\\");
+    s.nextSlice("\x1b]8;;ghostty-phil://msg?gen=ab&seg=2&sid=S&rec=R2\x1b\\*\x1b]8;;\x1b\\");
     const screen = t.screens.active;
 
     try testing.expect(try scrollToAnchor(testing.allocator, screen, "ghostty-phil://msg?gen=ab&seg=1&scroll=1"));
@@ -409,6 +418,12 @@ test "copy_nav: scrollToAnchor scrolls viewport to the matching anchor" {
 
     try testing.expect(!try scrollToAnchor(testing.allocator, screen, "ghostty-phil://msg?gen=ab&seg=9"));
     try testing.expect(!try scrollToAnchor(testing.allocator, screen, "ghostty-phil://copy?gen=ab&seg=1"));
+
+    // Exact display match beats a newer durable match; a stale gen falls back.
+    const both = Query.parse("ghostty-phil://msg?gen=ab&seg=1&sid=S&rec=R2").?;
+    try testing.expectEqual(@as(u32, 0), screen.pages.pointFromPin(.screen, (try findAnchor(testing.allocator, screen, both)).?).?.coord().y);
+    const stale = Query.parse("ghostty-phil://msg?gen=zz&seg=1&sid=S&rec=R").?;
+    try testing.expectEqual(@as(u32, 0), screen.pages.pointFromPin(.screen, (try findAnchor(testing.allocator, screen, stale)).?).?.coord().y);
 }
 
 test "copy_nav: anchor search misses leave compressed history compressed" {
