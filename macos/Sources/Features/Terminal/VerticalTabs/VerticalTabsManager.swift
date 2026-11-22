@@ -508,8 +508,11 @@ final class WindowTracker {
         // Each ring, not the badge: the badge stays set across repeat rings.
         let rings = NotificationCenter.default.publisher(for: .ghosttyBellDidRing)
             .filter { [weak window] in
-                guard let window, let surface = $0.object as? Ghostty.SurfaceView else { return false }
-                return surface.window === window
+                // The split tree, not `surface.window`: a split hidden by zoom
+                // is detached from the window but still rings.
+                guard let surface = $0.object as? Ghostty.SurfaceView,
+                      let tree = window?.terminalController?.surfaceTree else { return false }
+                return tree.contains { $0 === surface }
             }
             .map { _ in () }
             .eraseToAnyPublisher()
