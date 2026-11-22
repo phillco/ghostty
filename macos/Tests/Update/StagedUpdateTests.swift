@@ -40,7 +40,12 @@ struct StagedUpdateTests {
                                                         environment: override)
         #expect(overridden?.stagedDirectory.path == "/tmp/fake/staged")
         #expect(overridden?.installCommand == "ghostty-rebuild install")
-        #expect(overridden?.launchAgentLabel == "com.phillco.ghostty-phil-updater")
+        // A fixture never reaches the production updater unless one is named.
+        #expect(overridden?.launchAgentLabel == nil)
+        let named = StagedUpdateLocation.forBundle(
+            id: "io.phillip.ghostty-phil", home: home,
+            environment: override.merging(["GHOSTTY_PHIL_UPDATER_LABEL": "com.example.fixture"]) { $1 })
+        #expect(named?.launchAgentLabel == "com.example.fixture")
         let unknown = StagedUpdateLocation.forBundle(id: nil, home: home, environment: override)
         #expect(unknown?.stagedDirectory.path == "/tmp/fake/staged")
         #expect(unknown?.installCommand == "ghostty-rebuild install")

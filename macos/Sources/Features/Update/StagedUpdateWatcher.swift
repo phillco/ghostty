@@ -123,9 +123,14 @@ final class StagedUpdateWatcher: @unchecked Sendable {
 /// Installs a staged build by kicking its LaunchAgent, which quits and relaunches Ghostty.
 enum StagedUpdateInstaller {
     /// Runs `launchctl kickstart` off the main thread; returns a one-line error, or nil.
+    /// Refuses if `staged/` no longer holds the build the user confirmed. The updater
+    /// installs whatever is staged when it runs, so this narrows, not closes, the window.
     static func install(_ staged: StagedUpdate) async -> String? {
         guard let label = staged.location.launchAgentLabel else { return "No updater for this build" }
         return await Task.detached(priority: .userInitiated) {
+            guard StagedUpdate.load(from: staged.location) == staged else {
+                return "Staged build changed; check it again"
+            }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
             process.arguments = ["kickstart", "gui/\(getuid())/\(label)"]

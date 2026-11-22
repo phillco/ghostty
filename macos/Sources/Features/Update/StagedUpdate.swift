@@ -16,10 +16,13 @@ struct StagedUpdateLocation: Equatable {
     static let testBundleID = mainBundleID + ".link-test.debug"
     /// Points the watcher at another `staged/` directory, for GUI testing without real builds.
     static let overrideEnvironmentKey = "GHOSTTY_PHIL_STAGED_DIR"
+    /// The updater to kick for an overridden directory. Without it, an override has no
+    /// updater, so a fixture can never install over the real app.
+    static let overrideUpdaterEnvironmentKey = "GHOSTTY_PHIL_UPDATER_LABEL"
 
     /// The location for a bundle ID, or nil for builds `ghostty-rebuild` doesn't stage.
     /// A non-empty override directory applies to any bundle, with the main app's
-    /// command and updater so the whole popover can be exercised.
+    /// command and only an explicitly named updater.
     static func forBundle(id: String?, home: URL, environment: [String: String]) -> StagedUpdateLocation? {
         let state = home.appendingPathComponent(".local/share/ghostty-rebuild", isDirectory: true)
         if let override = environment[overrideEnvironmentKey], !override.isEmpty {
@@ -28,7 +31,7 @@ struct StagedUpdateLocation: Equatable {
                 stagedDirectory: URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true),
                 appNames: main.appNames,
                 installCommand: main.installCommand,
-                launchAgentLabel: main.launchAgentLabel)
+                launchAgentLabel: environment[overrideUpdaterEnvironmentKey].flatMap { $0.isEmpty ? nil : $0 })
         }
         switch id {
         case mainBundleID:
