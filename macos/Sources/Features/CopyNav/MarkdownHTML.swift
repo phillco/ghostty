@@ -443,7 +443,7 @@ enum MarkdownHTML {
                             body = String(body.dropFirst().dropLast())
                         }
                         i = k + r
-                        return "<code>\(MarkdownHTML.escape(body))</code>"
+                        return "\(MarkdownHTML.codeOpen)\(MarkdownHTML.escape(body))</code>"
                     }
                     k += r
                 } else {
@@ -611,9 +611,9 @@ enum MarkdownHTML {
             // Notes drops file: hrefs; show the name. Keep distinct link text too.
             let plainText = text.replacingOccurrences(of: #"<[^>]*>"#, with: "", options: .regularExpression)
             if plainText.isEmpty || plainText == escape(url) || plainText.hasSuffix(escape(base)) {
-                return "<code>\(escape(base))</code>"
+                return "\(codeOpen)\(escape(base))</code>"
             }
-            return "\(text) (<code>\(escape(base))</code>)"
+            return "\(text) (\(codeOpen)\(escape(base))</code>)"
         case .none:
             return text
         }
@@ -621,6 +621,10 @@ enum MarkdownHTML {
 
     /// Escapes per Unicode scalar: a `<` followed by a combining mark is one Character
     /// that compares unequal to "<", so Character-wise escaping would let it through.
+    /// Inline code. Apple Notes drops bare `<code>` to the body font, so it carries an
+    /// explicit monospace family (the only inline style emitted; no colors).
+    static let codeOpen = "<code style=\"font-family:Menlo,monospace\">"
+
     static func escape(_ s: String) -> String {
         var out = ""
         out.reserveCapacity(s.utf8.count)

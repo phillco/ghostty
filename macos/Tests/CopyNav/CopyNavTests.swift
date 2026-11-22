@@ -244,7 +244,7 @@ struct MarkdownHTMLTests {
     @Test func escapesRawHTML() {
         let html = MarkdownHTML.render("<script>alert(1)</script>\n\nhi <b>x</b> & `<i>`")
         #expect(!html.contains("<script>") && !html.contains("<b>") && !html.contains("<i>"))
-        #expect(html.contains("&lt;script&gt;") && html.contains("&amp;") && html.contains("<code>&lt;i&gt;</code>"))
+        #expect(html.contains("&lt;script&gt;") && html.contains("&amp;") && html.contains("<code style=\"font-family:Menlo,monospace\">&lt;i&gt;</code>"))
     }
 
     @Test func escapesPerScalar() {
@@ -270,9 +270,9 @@ struct MarkdownHTMLTests {
 
     @Test func fileLinksBecomeBasenames() {
         #expect(MarkdownHTML.render("[file:///Users/me/src/main.go](file:///Users/me/src/main.go)")
-            == "<p><code>main.go</code></p>\n")
+            == "<p><code style=\"font-family:Menlo,monospace\">main.go</code></p>\n")
         #expect(MarkdownHTML.render("see [the config](file:///etc/x.toml)")
-            == "<p>see the config (<code>x.toml</code>)</p>\n")
+            == "<p>see the config (<code style=\"font-family:Menlo,monospace\">x.toml</code>)</p>\n")
     }
 
     @Test func semanticBlocks() {
@@ -303,16 +303,21 @@ struct MarkdownHTMLTests {
         """
         let html = MarkdownHTML.render(md)
         #expect(html.contains("<h1>Title</h1>"))
-        #expect(html.contains("<p>Some <strong>bold</strong>, <em>em</em>, <del>gone</del> and <code>code</code>\ncontinued line.</p>"))
+        #expect(html.contains("<p>Some <strong>bold</strong>, <em>em</em>, <del>gone</del> and <code style=\"font-family:Menlo,monospace\">code</code>\ncontinued line.</p>"))
         #expect(html.contains("<ul>\n<li>one</li>\n<li>two\n<ul>\n<li>nested</li>\n</ul></li>\n</ul>"))
         #expect(html.contains("<ol>\n<li>first</li>\n<li>second</li>\n</ol>"))
         #expect(html.contains("<blockquote>\n<p>quoted</p>\n</blockquote>"))
         #expect(html.contains("<pre><code class=\"language-go\">func main() {}\n</code></pre>"))
         #expect(html.contains("<th align=\"left\">A</th><th align=\"right\">B</th>"))
-        #expect(html.contains("<td align=\"right\"><code>x|y</code></td>"))
+        #expect(html.contains("<td align=\"right\"><code style=\"font-family:Menlo,monospace\">x|y</code></td>"))
         #expect(html.contains("<hr>"))
         // Theme-neutral: no inline styles or colors.
-        #expect(!html.contains("style=") && !html.contains("color"))
+        // Theme-neutral: the only inline style is inline code's font family.
+        #expect(!html.contains("color") && !html.contains("white-space"))
+        #expect(html.components(separatedBy: "style=").count - 1
+            == html.components(separatedBy: MarkdownHTML.codeOpen).count - 1)
+        // Fenced code stays a plain <pre><code>.
+        #expect(html.contains("<pre><code class=\"language-go\">"))
     }
 
     @Test func intrawordUnderscoresAndBareURLs() {
@@ -365,6 +370,17 @@ struct RichClipTests {
         #expect(pb.string(forType: .html)?.contains("<strong>m</strong>") == true)
         #expect(pb.data(forType: .rtf) != nil)
         #expect(pb.pasteboardItems?.count == 1)
+    }
+
+    @Test func markdownCopyWritesOnlyMarkdown() {
+        let pb = scratchPasteboard()
+        defer { pb.releaseGlobally() }
+        let ticket = CopyPasteboard.writePlain("plain fallback", to: pb)
+        let clip = RichClip(response(kind: "prose", markdown: "# H\n\n`c`"), markdownPlain: true)
+        #expect(CopyPasteboard.commit(clip, to: pb, ticket: ticket))
+        #expect(pb.string(forType: .string) == "# H\n\n`c`")
+        #expect(pb.string(forType: RichClip.markdownType) == "# H\n\n`c`")
+        #expect(pb.data(forType: .html) == nil && pb.data(forType: .rtf) == nil)
     }
 
     @Test func otherAppsWriteWins() {

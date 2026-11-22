@@ -9,6 +9,9 @@ struct RichClip: Equatable {
     var html: String
     var markdown: String
     var plain: String
+    /// Explicit Markdown copy: only the Markdown and plain-text flavors are written, so
+    /// rich-text apps paste the Markdown source rather than rendering it.
+    var markdownOnly: Bool
 
     /// `markdownPlain` is the explicit `copy_to_clipboard:markdown` flavor: plain text
     /// carries the Markdown, fences included. Otherwise code selections (`kind == "code"`)
@@ -16,6 +19,7 @@ struct RichClip: Equatable {
     init(_ r: ResolveResponse, markdownPlain: Bool = false) {
         let markdown = r.markdown ?? ""
         self.markdown = markdown
+        self.markdownOnly = markdownPlain
         self.html = "<meta charset=\"utf-8\">" + MarkdownHTML.render(markdown)
         if markdownPlain {
             plain = markdown
@@ -49,8 +53,10 @@ struct RichClip: Equatable {
     @MainActor
     func pasteboardItem() -> NSPasteboardItem {
         let item = NSPasteboardItem()
-        item.setString(html, forType: .html)
-        if let rtf = rtf() { item.setData(rtf, forType: .rtf) }
+        if !markdownOnly {
+            item.setString(html, forType: .html)
+            if let rtf = rtf() { item.setData(rtf, forType: .rtf) }
+        }
         item.setString(markdown, forType: Self.markdownType)
         item.setString(plain, forType: .string)
         return item
