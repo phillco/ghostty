@@ -2818,7 +2818,7 @@ extension Ghostty.SurfaceView {
             if let range = (parameter as? NSValue)?.rangeValue {
                 return NSValue(rect: accessibilityFrame(for: range))
             }
-            return NSValue(rect: NSMakeRect(frame.origin.x, frame.origin.y, 0, 0))
+            return NSValue(rect: NSRect(x: frame.origin.x, y: frame.origin.y, width: 0, height: 0))
         }
 
         return super.accessibilityAttributeValue(attribute, forParameter: parameter)
