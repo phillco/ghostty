@@ -133,10 +133,19 @@ enum StagedUpdateInstaller {
                 return "Staged build changed; check it again"
             }
             let request = staged.location.installRequestFile
+            let contents: Data
             do {
-                try staged.installRequest(at: Date()).write(to: request, options: .atomic)
+                contents = try staged.installRequest(at: Date())
+                try contents.write(to: request, options: .atomic)
             } catch {
                 return error.localizedDescription
+            }
+            // The updater didn't start, so nothing will consume our request. Leave a
+            // newer one (another click or window) alone.
+            func withdrawRequest() {
+                if FileManager.default.contents(atPath: request.path) == contents {
+                    try? FileManager.default.removeItem(at: request)
+                }
             }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
@@ -147,14 +156,14 @@ enum StagedUpdateInstaller {
             do {
                 try process.run()
             } catch {
+                withdrawRequest()
                 return error.localizedDescription
             }
             let output = stderr.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             let status = process.terminationStatus
             guard status != 0 else { return nil }
-            // The updater didn't start, so nothing will consume the request.
-            try? FileManager.default.removeItem(at: request)
+            withdrawRequest()
             // 113: no such service, i.e. the LaunchAgent isn't loaded.
             if status == 113 { return "Updater not loaded (\(label))" }
             let message = String(bytes: output, encoding: .utf8)?
