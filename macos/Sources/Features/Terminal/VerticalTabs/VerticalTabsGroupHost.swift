@@ -198,7 +198,7 @@ final class VerticalTabsGroupHost {
                 bell: controller?.bell ?? false,
                 isSelected: ObjectIdentifier(window) == selectedID,
                 lastLeft: tracker.lastLeft,
-                lastActive: tracker.lastActive ?? tracker.lastLeft,
+                lastActive: tracker.shownActive,
                 claimedPinKey: tracker.claimedPinKey
             )
         }

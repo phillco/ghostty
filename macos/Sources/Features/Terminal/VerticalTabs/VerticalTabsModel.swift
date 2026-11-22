@@ -120,6 +120,18 @@ enum VerticalTabs {
         return Double(hash % 360) / 360
     }
 
+    /// Whether a window title change counts as activity for the idle age.
+    /// Ghostty reassigns unchanged titles (e.g. on focus) and toggles its bell
+    /// prefix when a bell rings or is cleared by focusing the tab; neither is.
+    /// Spinner frames are real changes, so they count.
+    static func titleChangeIsActivity(from old: String?, to new: String?) -> Bool {
+        func strip(_ title: String?) -> String? {
+            guard let title else { return nil }
+            return title.hasPrefix("🔔 ") ? String(title.dropFirst(2)) : title
+        }
+        return strip(old) != strip(new)
+    }
+
     /// Compact relative age: `now` under a minute, then `2m`, `3h`, `4d`.
     static func ageText(since date: Date?, now: Date) -> String? {
         guard let date else { return nil }
@@ -147,7 +159,7 @@ enum VerticalTabs {
         var isSelected: Bool = false
         /// When another tab in the group was last selected over this one.
         var lastLeft: Date?
-        /// Last focus or title change; drives the idle age.
+        /// Last title change or bell, else `lastLeft`; drives the idle age.
         var lastActive: Date?
         /// The pin key this tab matched last time, if any. A claimed key keeps
         /// matching this tab even after its surface moves to another tab (split

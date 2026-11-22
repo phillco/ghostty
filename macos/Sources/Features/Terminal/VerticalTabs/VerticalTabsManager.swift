@@ -228,7 +228,7 @@ final class VerticalTabsManager: NSObject {
         // A walk's rows hold still: no earlier settle may reshuffle them mid-walk.
         if directional { host.settleGeneration += 1 }
         if update.settle { settleWalk(in: host, on: window, enteredAt: now) }
-        tracker(for: window).lastActive = now
+        // No `lastActive` stamp: a glance or a walk past a tab isn't activity.
         syncTabBar(of: window)
         let inset = leadingInset(for: window)
         if window.terminalViewContainerForVerticalTabs?.leadingInset != inset {
@@ -444,7 +444,10 @@ final class WindowTracker {
     var lastLeft: Date?
     /// When this tab was last selected; see `VerticalTabsManager.recentsDwell`.
     var lastEntered: Date?
+    /// Last real title change or bell. Focus deliberately doesn't count.
     var lastActive: Date?
+    /// Drives the idle age: activity, else when this tab was last left.
+    var shownActive: Date? { lastActive ?? lastLeft }
     /// The pin key this tab matched on the last refresh.
     var claimedPinKey: String?
     /// The agent platform seen last, kept across ambiguous spinner frames.
@@ -492,17 +495,30 @@ final class WindowTracker {
         backdropWidth = nil
     }
 
-    init(window: TerminalWindow, onChange: @escaping () -> Void) {
-        titleObservation = window.observe(\.title, options: [.new]) { [weak self] _, _ in
+    convenience init(window: TerminalWindow, onChange: @escaping () -> Void) {
+        self.init(
+            window: window,
+            bell: window.terminalController?.$bell.eraseToAnyPublisher(),
+            onChange: onChange)
+    }
+
+    init(window: NSWindow, bell: AnyPublisher<Bool, Never>?, onChange: @escaping () -> Void) {
+        titleObservation = window.observe(\.title, options: [.old, .new]) { [weak self] _, change in
+            // KVO fires on every assignment, even an unchanged one.
+            guard VerticalTabs.titleChangeIsActivity(from: change.oldValue, to: change.newValue) else { return }
             // Spinner frames change the raw title often; record activity and let
             // the throttled refresh decide whether anything visible changed.
             self?.lastActive = Date()
             onChange()
         }
-        bellCancellable = window.terminalController?.$bell
+        bellCancellable = bell?
             .removeDuplicates()
             .dropFirst()
-            .sink { _ in onChange() }
+            .sink { [weak self] rang in
+                // Only a ring is activity; focusing the tab clears the bell.
+                if rang { self?.lastActive = Date() }
+                onChange()
+            }
     }
 }
 
