@@ -43,6 +43,9 @@ struct UpdatePopoverView: View {
 
             case .error(let error):
                 UpdateErrorView(error: error, dismiss: dismiss)
+
+            case .staged(let staged):
+                StagedUpdateView(staged: staged, model: model)
             }
         }
         .frame(width: 300)
@@ -341,5 +344,122 @@ private struct UpdateErrorView: View {
             }
         }
         .padding(16)
+    }
+}
+
+private struct StagedUpdateView: View {
+    let staged: StagedUpdate
+    @ObservedObject var model: UpdateViewModel
+
+    @State private var installing = false
+    @State private var copied = false
+
+    private let labelWidth: CGFloat = 52
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Update Ready")
+                .font(.system(size: 13, weight: .semibold))
+
+            VStack(alignment: .leading, spacing: 4) {
+                row("Revision") {
+                    HStack(spacing: 4) {
+                        Text(staged.shortRevision)
+                            .font(.system(size: 11, design: .monospaced))
+                        if staged.metadata.dirty { tag("dirty") }
+                        if staged.isFastSwift { tag("fast Swift") }
+                    }
+                }
+                if let branch = staged.metadata.branch, !branch.isEmpty {
+                    row("Branch") { Text(branch) }
+                }
+                if let subject = staged.metadata.subject, !subject.isEmpty {
+                    row("Commit") {
+                        Text(subject)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if let built = staged.builtAt {
+                    row("Built") {
+                        TimelineView(.periodic(from: .now, by: 30)) { context in
+                            Text("\(StagedUpdate.clockTime(built)) · \(StagedUpdate.relativeAge(of: built, now: context.date))")
+                        }
+                    }
+                }
+            }
+            .font(.system(size: 11))
+            .textSelection(.enabled)
+
+            if let error = model.stagedInstallError {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text(error)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.system(size: 11))
+            }
+
+            HStack(spacing: 8) {
+                Spacer()
+
+                if staged.location.launchAgentLabel == nil {
+                    copyButton
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    copyButton
+                    Button(installing ? "Installing…" : "Install & Restart") {
+                        install()
+                    }
+                    .disabled(installing)
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .controlSize(.small)
+        }
+        .padding(16)
+    }
+
+    private var copyButton: some View {
+        Button(copied ? "Copied" : "Copy Command") {
+            StagedUpdateInstaller.copyCommand(staged)
+            copied = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                copied = false
+            }
+        }
+        .help(staged.location.installCommand)
+    }
+
+    private func install() {
+        installing = true
+        model.stagedInstallError = nil
+        Task { @MainActor in
+            // On success the updater quits and relaunches Ghostty.
+            model.stagedInstallError = await StagedUpdateInstaller.install(staged)
+            installing = false
+        }
+    }
+
+    private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(label)
+                .foregroundColor(.secondary)
+                .frame(width: labelWidth, alignment: .trailing)
+            content()
+        }
+    }
+
+    private func tag(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .medium))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(Color.secondary.opacity(0.2)))
     }
 }

@@ -14,6 +14,7 @@ class UpdateController {
 
     private(set) var updater: SPUUpdater
     private let userDriver: UpdateDriver
+    private var stagedWatcher: StagedUpdateWatcher?
 
     var viewModel: UpdateViewModel {
         userDriver.viewModel
@@ -43,6 +44,11 @@ class UpdateController {
     /// This must be called before the updater can check for updates. If starting fails,
     /// the error will be shown to the user.
     func startUpdater() {
+        // Builds staged by ghostty-rebuild show in the update pill, with or without Sparkle.
+        if stagedWatcher == nil {
+            stagedWatcher = StagedUpdateWatcher.forCurrentApp(model: viewModel)
+            stagedWatcher?.start()
+        }
         guard Self.isSupported else { return }
         do {
             try updater.start()

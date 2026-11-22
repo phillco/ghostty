@@ -5,6 +5,9 @@ import Sparkle
 class UpdateViewModel: ObservableObject {
     @Published var state: UpdateState = .idle
 
+    /// The last failed attempt to install the staged build, shown in its popover.
+    @Published var stagedInstallError: String?
+
     /// The text to display for the current update state.
     /// Returns an empty string for idle state, progress percentages for downloading/extracting,
     /// or descriptive text for other states.
@@ -36,6 +39,8 @@ class UpdateViewModel: ObservableObject {
             return "No Updates Available"
         case .error(let err):
             return err.error.localizedDescription
+        case .staged:
+            return "Update Ready"
         }
     }
 
@@ -73,6 +78,8 @@ class UpdateViewModel: ObservableObject {
             return "info.circle"
         case .error:
             return "exclamationmark.triangle.fill"
+        case .staged:
+            return "shippingbox.fill"
         }
     }
 
@@ -102,6 +109,8 @@ class UpdateViewModel: ObservableObject {
             return "You are running the latest version"
         case .error:
             return "An error occurred during the update process"
+        case .staged(let staged):
+            return staged.metadata.subject ?? staged.shortRevision
         }
     }
 
@@ -120,6 +129,8 @@ class UpdateViewModel: ObservableObject {
             return nil
         case .extracting(let extracting):
             return String(format: "%.0f%%", extracting.progress * 100)
+        case .staged(let staged):
+            return staged.shortRevision
         default:
             return nil
         }
@@ -134,7 +145,7 @@ class UpdateViewModel: ObservableObject {
             return .white
         case .checking:
             return .secondary
-        case .updateAvailable:
+        case .updateAvailable, .staged:
             return .accentColor
         case .downloading, .extracting, .installing:
             return .secondary
@@ -150,7 +161,7 @@ class UpdateViewModel: ObservableObject {
         switch state {
         case .permissionRequest:
             return Color(nsColor: NSColor.systemBlue.blended(withFraction: 0.3, of: .black) ?? .systemBlue)
-        case .updateAvailable:
+        case .updateAvailable, .staged:
             return .accentColor
         case .notFound:
             return Color(nsColor: NSColor.systemBlue.blended(withFraction: 0.5, of: .black) ?? .systemBlue)
@@ -166,7 +177,7 @@ class UpdateViewModel: ObservableObject {
         switch state {
         case .permissionRequest:
             return .white
-        case .updateAvailable:
+        case .updateAvailable, .staged:
             return .white
         case .notFound:
             return .white
@@ -188,6 +199,8 @@ enum UpdateState: Equatable {
     case downloading(Downloading)
     case extracting(Extracting)
     case installing(Installing)
+    /// A newer build `ghostty-rebuild` staged on disk; see `StagedUpdateWatcher`.
+    case staged(StagedUpdate)
 
     /// True if we're installing an update triggered manually.
     var shouldTerminateWithoutWarning: Bool {
@@ -215,7 +228,8 @@ enum UpdateState: Equatable {
                 .updateAvailable,
                 .downloading,
                 .extracting,
-                .installing:
+                .installing,
+                .staged:
             return true
 
         default:
@@ -251,6 +265,8 @@ enum UpdateState: Equatable {
             nil
         case .installing:
             nil
+        case .staged:
+            nil
         }
     }
 
@@ -268,6 +284,8 @@ enum UpdateState: Equatable {
             suppressTerminationWarnings.appcastItem = nil
             self = .installing(suppressTerminationWarnings)
             installing.retryTerminatingApplication()
+        case .staged(let staged):
+            StagedUpdateInstaller.confirm(staged)
         default:
             break
         }
@@ -293,6 +311,8 @@ enum UpdateState: Equatable {
             return lExt.progress == rExt.progress
         case (.installing(let lhs), .installing(let rhs)):
             return lhs.appcastItem?.displayVersionString == rhs.appcastItem?.displayVersionString
+        case (.staged(let lhs), .staged(let rhs)):
+            return lhs == rhs
         default:
             return false
         }

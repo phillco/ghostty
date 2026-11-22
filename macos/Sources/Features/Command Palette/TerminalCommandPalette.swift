@@ -91,12 +91,24 @@ struct TerminalCommandPaletteView: View {
             return options
         }
 
-        if updateViewModel.state.isInstallable {
+        if case .staged(let staged) = updateViewModel.state, staged.location.launchAgentLabel == nil {
+            options.append(CommandOption(
+                title: "Copy Update Install Command",
+                description: staged.location.installCommand,
+                leadingIcon: "doc.on.doc",
+                badge: updateViewModel.badge,
+                emphasis: true
+            ) {
+                StagedUpdateInstaller.copyCommand(staged)
+            })
+        } else if updateViewModel.state.isInstallable {
             // We override the update available one only because we want to properly
             // convey it'll go all the way through.
             let title: String
             if case .updateAvailable = updateViewModel.state {
                 title = "Update Ghostty and Restart"
+            } else if case .staged = updateViewModel.state {
+                title = "Install Staged Update and Restart"
             } else {
                 title = updateViewModel.text
             }
