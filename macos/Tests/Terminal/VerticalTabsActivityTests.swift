@@ -14,8 +14,11 @@ struct VerticalTabsActivityTests {
             contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
             styleMask: [.titled], backing: .buffered, defer: true)
         let bell = CurrentValueSubject<Bool, Never>(false)
+        let rings = PassthroughSubject<Void, Never>()
         var changes = 0
-        lazy var tracker = WindowTracker(window: window, bell: bell.eraseToAnyPublisher()) { [unowned self] in
+        lazy var tracker = WindowTracker(
+            window: window, bell: bell.eraseToAnyPublisher(), rings: rings.eraseToAnyPublisher()
+        ) { [unowned self] in
             changes += 1
         }
 
@@ -58,25 +61,36 @@ struct VerticalTabsActivityTests {
         #expect(f.tracker.lastActive == past)
     }
 
-    @Test func aBellRingIsActivityButClearingItIsNot() {
+    @Test func everyBellRingIsActivity() {
         let f = Fixture()
         f.tracker.lastActive = past
         f.bell.send(true)
-        let rang = f.tracker.lastActive
-        #expect(rang! > past)
-        #expect(f.changes == 1)
+        f.rings.send()
+        #expect(f.tracker.lastActive! > past)
 
+        // A repeat ring while the badge is still set still counts.
         f.tracker.lastActive = past
-        f.bell.send(false)  // focusing the tab clears the bell
-        #expect(f.tracker.lastActive == past)
-        #expect(f.changes == 2)  // still refreshes so the bell badge goes away
+        f.rings.send()
+        #expect(f.tracker.lastActive! > past)
     }
 
-    @Test func idleAgeFallsBackToLastLeft() {
+    @Test func theBellBadgeAloneIsNotActivity() {
+        let f = Fixture()
+        f.tracker.lastActive = past
+        f.bell.send(true)
+        f.bell.send(false)  // focusing the tab clears the bell
+        #expect(f.tracker.lastActive == past)
+        #expect(f.changes == 2)  // still refreshes so the badge shows and goes away
+    }
+
+    @Test func idleAgeFallsBackToLastLeftThenFirstLeft() {
         let f = Fixture()
         #expect(f.tracker.shownActive == nil)
-        f.tracker.lastLeft = past
+        f.tracker.firstLeft = past
         #expect(f.tracker.shownActive == past)
+        let left = past.addingTimeInterval(30)
+        f.tracker.lastLeft = left
+        #expect(f.tracker.shownActive == left)
         let later = past.addingTimeInterval(60)
         f.tracker.lastActive = later
         #expect(f.tracker.shownActive == later)

@@ -222,6 +222,12 @@ final class VerticalTabsManager: NSObject {
             selecting: id, leaving: leaving, directional: directional,
             sections: host.sections, kept: host.keptRecents)
         if update.stampLeft, let previous = host.lastSelectedWindow { tracker(for: previous).lastLeft = now }
+        // Any departure seeds an age once, so a quiet tab only ever stepped
+        // past still shows one; later step-pasts leave it be.
+        if case .tab = leaving, let previous = host.lastSelectedWindow {
+            let tracker = tracker(for: previous)
+            if tracker.firstLeft == nil { tracker.firstLeft = now }
+        }
         if leaving != .same { tracker(for: window).lastEntered = now }
         host.lastSelectedWindow = window
         host.keptRecents = update.kept
@@ -446,8 +452,10 @@ final class WindowTracker {
     var lastEntered: Date?
     /// Last real title change or bell. Focus deliberately doesn't count.
     var lastActive: Date?
+    /// The first time any switch left this tab, even a walk past it.
+    var firstLeft: Date?
     /// Drives the idle age: activity, else when this tab was last left.
-    var shownActive: Date? { lastActive ?? lastLeft }
+    var shownActive: Date? { lastActive ?? lastLeft ?? firstLeft }
     /// The pin key this tab matched on the last refresh.
     var claimedPinKey: String?
     /// The agent platform seen last, kept across ambiguous spinner frames.
@@ -455,6 +463,7 @@ final class WindowTracker {
 
     private var titleObservation: NSKeyValueObservation?
     private var bellCancellable: AnyCancellable?
+    private var ringCancellable: AnyCancellable?
 
     /// A plain layer-backed view filling the sidebar inset. Inactive tabs show it
     /// in place of the live sidebar, so a tab switch never flashes the window
@@ -496,13 +505,30 @@ final class WindowTracker {
     }
 
     convenience init(window: TerminalWindow, onChange: @escaping () -> Void) {
+        // Each ring, not the badge: the badge stays set across repeat rings.
+        let rings = NotificationCenter.default.publisher(for: .ghosttyBellDidRing)
+            .filter { [weak window] in
+                guard let window, let surface = $0.object as? Ghostty.SurfaceView else { return false }
+                return surface.window === window
+            }
+            .map { _ in () }
+            .eraseToAnyPublisher()
         self.init(
             window: window,
             bell: window.terminalController?.$bell.eraseToAnyPublisher(),
+            rings: rings,
             onChange: onChange)
     }
 
-    init(window: NSWindow, bell: AnyPublisher<Bool, Never>?, onChange: @escaping () -> Void) {
+    /// - Parameters:
+    ///   - bell: The tab's bell badge; changes only refresh the sidebar.
+    ///   - rings: One event per bell ring in this tab; each is activity.
+    init(
+        window: NSWindow,
+        bell: AnyPublisher<Bool, Never>?,
+        rings: AnyPublisher<Void, Never>?,
+        onChange: @escaping () -> Void
+    ) {
         titleObservation = window.observe(\.title, options: [.old, .new]) { [weak self] _, change in
             // KVO fires on every assignment, even an unchanged one.
             guard VerticalTabs.titleChangeIsActivity(from: change.oldValue, to: change.newValue) else { return }
@@ -514,11 +540,12 @@ final class WindowTracker {
         bellCancellable = bell?
             .removeDuplicates()
             .dropFirst()
-            .sink { [weak self] rang in
-                // Only a ring is activity; focusing the tab clears the bell.
-                if rang { self?.lastActive = Date() }
-                onChange()
-            }
+            .sink { _ in onChange() }
+        // Focusing the tab clears the badge; only a ring is activity.
+        ringCancellable = rings?.sink { [weak self] in
+            self?.lastActive = Date()
+            onChange()
+        }
     }
 }
 

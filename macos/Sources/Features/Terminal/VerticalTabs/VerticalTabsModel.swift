@@ -159,7 +159,7 @@ enum VerticalTabs {
         var isSelected: Bool = false
         /// When another tab in the group was last selected over this one.
         var lastLeft: Date?
-        /// Last title change or bell, else `lastLeft`; drives the idle age.
+        /// Last title change or bell ring, else when the tab was last left; drives the idle age.
         var lastActive: Date?
         /// The pin key this tab matched last time, if any. A claimed key keeps
         /// matching this tab even after its surface moves to another tab (split
