@@ -480,15 +480,15 @@ final class VerticalTabsManager: NSObject {
         let now = Date()
         let surface = visiblyFocusedSurface
         let id = surface?.id.uuidString
-        if id != ackFocus?.surfaceID {
-            ackFocus = id.map { .init(surfaceID: $0, since: now) }
-            // A directional arrival's dwell lasts one focus visit: coming
-            // back to the tab later (a click into the window) acks at once.
-            let window = surface?.window as? TerminalWindow
-            if let left = ackFocusWindow, left !== window {
-                trackers[ObjectIdentifier(left)]?.enteredDirectionally = false
-            }
-            ackFocusWindow = window
+        if id != ackFocus?.surfaceID { ackFocus = id.map { .init(surfaceID: $0, since: now) } }
+        // A directional arrival's dwell lasts one visit to its window: coming
+        // back later (a click into the window) acks at once. The key window,
+        // not the first responder, so the sidebar filter or a Find field
+        // doesn't end the visit.
+        let keyWindow = NSApp.isActive ? NSApp.keyWindow as? TerminalWindow : nil
+        if keyWindow !== ackFocusWindow {
+            if let left = ackFocusWindow { trackers[ObjectIdentifier(left)]?.enteredDirectionally = false }
+            ackFocusWindow = keyWindow
         }
         guard let surface, !agentSnapshot.isEmpty else { return }
         let session = agentSnapshot.session(for: VerticalTabsGroupHost.agentTerminal(surface))
