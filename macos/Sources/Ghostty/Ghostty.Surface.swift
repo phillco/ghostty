@@ -111,6 +111,12 @@ extension Ghostty {
             return Input.BindingFlags(cFlags: flags)
         }
 
+        /// Whether the key event triggers copy_to_clipboard (performable or not).
+        @MainActor
+        func keyIsCopyBinding(_ event: ghostty_input_key_s) -> Bool {
+            ghostty_surface_key_is_copy_binding(surface, event)
+        }
+
         /// See `keyIsBinding(_ event: ghostty_input_key_s)`.
         @MainActor
         func keyIsBinding(_ event: Input.KeyEvent) -> Input.BindingFlags? {

@@ -1427,11 +1427,17 @@ extension Ghostty {
                 }
             }
 
-            // ⌘C with no selection and ⌘X edit ag's composer draft, unless a binding that
-            // always applies (not just a performable copy) or a sequence/table owns the key.
+            // ⌘C with no selection and ⌘X edit ag's composer draft, unless another
+            // binding, key sequence or table owns the key.
+            let isCopyBinding = bindingFlags != nil && surfaceModel.map { surface in
+                var ghosttyEvent = event.ghosttyKeyEvent(GHOSTTY_ACTION_PRESS)
+                return (event.characters ?? "").withCString { ptr in
+                    ghosttyEvent.text = ptr
+                    return surface.keyIsCopyBinding(ghosttyEvent)
+                }
+            } == true
             if keySequence.isEmpty, keyTables.isEmpty,
-               bindingFlags.map({ $0.contains(.performable) }) ?? true,
-               AgComposerKeys.handle(event, view: self) {
+               AgComposerKeys.handle(event, view: self, bindingFlags: bindingFlags, isCopyBinding: isCopyBinding) {
                 return true
             }
 

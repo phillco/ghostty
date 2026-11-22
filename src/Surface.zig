@@ -2545,8 +2545,9 @@ const SemanticResult = union(enum) {
     /// Not a semantic copy: use the requested format as usual.
     none,
     /// Below an ag anchor but no usable snapshot: copy plain text only, never
-    /// the terminal HTML (it would turn copy chips into links).
-    plain_only,
+    /// the terminal HTML (it would turn copy chips into links). Carries the
+    /// already formatted text when there is one.
+    plain_only: ?[:0]const u8,
     semantic: SemanticCopy,
 };
 
@@ -2565,15 +2566,14 @@ fn semanticCopySnapshot(
     // Find the anchor before formatting so ordinary copies format only once.
     const anchor = (copy_nav.selectionAnchor(self.alloc, screen, sel) catch |err| {
         log.warn("semantic copy anchor scan failed err={}", .{err});
-        return .plain_only;
+        return .{ .plain_only = null };
     }) orelse return .none;
     defer anchor.deinit(self.alloc);
 
-    const v = self.semanticCopyBuild(screen, sel, anchor, format) catch |err| {
+    return self.semanticCopyBuild(screen, sel, anchor, format) catch |err| {
         log.warn("semantic copy snapshot failed err={}", .{err});
-        return .plain_only;
+        return .{ .plain_only = null };
     };
-    return if (v) |copy| .{ .semantic = copy } else .plain_only;
 }
 
 fn semanticCopyBuild(
@@ -2582,7 +2582,7 @@ fn semanticCopyBuild(
     sel: terminal.Selection,
     anchor: copy_nav.Found,
     format: input.Binding.Action.CopyToClipboard,
-) !?SemanticCopy {
+) !SemanticResult {
     var aw: std.Io.Writer.Allocating = .init(self.alloc);
     defer aw.deinit();
     var formatter: terminal.formatter.ScreenFormatter = .init(screen, .{
@@ -2603,10 +2603,7 @@ fn semanticCopyBuild(
         anchor,
         plain,
         if (format == .markdown) .markdown else .rich,
-    ) orelse {
-        self.alloc.free(plain);
-        return null;
-    };
+    ) orelse return .{ .plain_only = plain };
     defer self.alloc.free(json);
     const json_z = try self.alloc.dupeSentinel(u8, json, 0);
     errdefer self.alloc.free(json_z);
@@ -2625,7 +2622,7 @@ fn semanticCopyBuild(
         try hf.format(&hw.writer);
         break :html try hw.toOwnedSliceSentinel(0);
     };
-    return .{ .plain = plain, .json = json_z, .html = html };
+    return .{ .semantic = .{ .plain = plain, .json = json_z, .html = html } };
 }
 
 /// Scrolls to the `ghostty-phil://msg` anchor matching `uri` (by gen+seg or
@@ -2947,6 +2944,23 @@ pub fn preeditCallback(self: *Surface, preedit_: ?[]const u8) !void {
 /// is performable, only if the key event would trigger a binding.
 /// If a performable binding is found and the event is not performable,
 /// then Ghosty will act as though the binding does not exist.
+/// Whether `event` triggers the copy_to_clipboard binding (any format), as
+/// its only action. The macOS app uses this to tell a selection copy that
+/// has nothing to copy from other bindings on the same key.
+pub fn keyEventIsCopyBinding(self: *Surface, event_orig: input.KeyEvent) bool {
+    var event = event_orig;
+    if (self.config.key_remaps.isRemapped(event_orig.mods)) {
+        event.mods = self.config.key_remaps.apply(event_orig.mods);
+    }
+    if (event.action == .release) return false;
+    if (self.keyboard.sequence_set != null or self.keyboard.table_stack.items.len > 0) return false;
+    const entry = self.config.keybind.set.getEvent(event) orelse return false;
+    return switch (entry.value_ptr.*) {
+        .leaf => |v| v.action == .copy_to_clipboard,
+        else => false,
+    };
+}
+
 pub fn keyEventIsBinding(
     self: *Surface,
     event_orig: input.KeyEvent,
@@ -5376,7 +5390,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             if (self.io.terminal.screens.active.selection) |sel| {
                 switch (self.semanticCopySnapshot(sel, format)) {
                     .none => try self.copySelectionToClipboards(sel, &.{.standard}, format),
-                    .plain_only => try self.copySelectionToClipboards(sel, &.{.standard}, .plain),
+                    .plain_only => |formatted| if (formatted) |text| {
+                        defer self.alloc.free(text);
+                        self.rt_surface.setClipboard(.standard, &.{
+                            .{ .mime = "text/plain", .data = text },
+                        }, false) catch |err| log.err("error setting clipboard err={}", .{err});
+                    } else try self.copySelectionToClipboards(sel, &.{.standard}, .plain),
                     .semantic => |v| semantic = v,
                 }
 
@@ -6370,6 +6389,12 @@ pub fn completeClipboardRequest(
                 if (copy_nav.isReservedMime(c.mime)) continue;
                 try allowed.append(self.alloc, c);
             }
+            // A write made only of reserved types is refused, leaving the
+            // clipboard alone; only a truly empty commit clears it.
+            if (kitty.contents.len > 0 and allowed.items.len == 0) {
+                try self.kittyClipboardStatus(.write, kitty.id, kitty.terminator, .EPERM);
+                return;
+            }
             self.rt_surface.setClipboard(
                 kitty.location,
                 if (allowed.items.len > 0) allowed.items else &.{.{
@@ -7041,4 +7066,31 @@ test "linkAtPos detects URLs and OSC8 without modifiers" {
     surface.config.link_osc8 = false;
     try testing.expectEqual(null, try surface.linkAtPos(.{ .x = 20, .y = 0 }));
     try testing.expectEqual(input.Link.Action.open, (try surface.linkAtPos(.{ .x = 0, .y = 0 })).?.action);
+}
+
+test "keyEventIsCopyBinding finds only copy_to_clipboard" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    var cfg = try configpkg.Config.default(alloc);
+    defer cfg.deinit();
+    const surface = try alloc.create(Surface);
+    defer alloc.destroy(surface);
+    surface.config = try DerivedConfig.init(alloc, &cfg);
+    defer surface.config.deinit();
+    surface.keyboard = .{};
+
+    const press = struct {
+        fn f(cp: u21) input.KeyEvent {
+            return .{
+                .action = .press,
+                .key = .unidentified,
+                .mods = .{ .super = true },
+                .unshifted_codepoint = cp,
+            };
+        }
+    }.f;
+    try testing.expect(surface.keyEventIsCopyBinding(press('c')) == builtin.target.os.tag.isDarwin());
+    // Bound, but to paste.
+    try testing.expect(!surface.keyEventIsCopyBinding(press('v')));
+    try testing.expect(!surface.keyEventIsCopyBinding(press('j')));
 }

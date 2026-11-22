@@ -68,9 +68,11 @@ enum CopyProvider {
 /// protocol off, so other programs never see the sequences.
 @MainActor
 enum AgComposerKeys {
-    static func handle(_ event: NSEvent, view: Ghostty.SurfaceView) -> Bool {
+    static func handle(_ event: NSEvent, view: Ghostty.SurfaceView, bindingFlags: Ghostty.Input.BindingFlags?,
+                       isCopyBinding: Bool) -> Bool {
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function]) == .command,
               let key = event.charactersIgnoringModifiers?.lowercased(), key == "c" || key == "x",
+              yieldsToComposer(key: key, bindingFlags: bindingFlags, isCopyBinding: isCopyBinding),
               let surface = view.surface, let model = view.surfaceModel else { return false }
         // A terminal selection means the user is copying terminal text, not the draft.
         guard !ghostty_surface_has_selection(surface),
@@ -80,6 +82,13 @@ enum AgComposerKeys {
               ForegroundJob.isOnly(agPID: pid, foregroundPGID: Int32(fg), tty: tty) else { return false }
         let action = key == "c" ? "text:\\x1b[99;9u" : "text:\\x1b[120;9u"
         return ghostty_surface_binding_action(surface, action, UInt(action.utf8.count))
+    }
+
+    /// Only an unbound key, or ⌘C whose binding is the performable selection copy (which
+    /// has nothing to copy here), falls to the composer; any other binding keeps the key.
+    static func yieldsToComposer(key: String, bindingFlags: Ghostty.Input.BindingFlags?, isCopyBinding: Bool) -> Bool {
+        guard let bindingFlags else { return true }
+        return key == "c" && isCopyBinding && bindingFlags.contains(.performable)
     }
 }
 

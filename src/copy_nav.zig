@@ -258,12 +258,19 @@ const Snapshot = struct {
 /// for selections already formatted (their pages are resident anyway).
 pub fn selectionHasCopyLinks(screen: *Screen, sel: terminal.Selection) bool {
     const ordered = sel.ordered(screen, .forward);
-    var it = ordered.start().rowIterator(.right_down, ordered.end());
+    const top = ordered.start();
+    const bot = ordered.end();
+    var it = top.rowIterator(.right_down, bot);
     while (it.next()) |p| {
         const rac = p.rowAndCell();
         if (!rac.row.hyperlink) continue;
         const page = p.node.page();
-        for (page.getCells(rac.row)) |*cell| {
+        const cells = page.getCells(rac.row);
+        // Only the selected cells: first and last rows are partial.
+        const first = if (p.node == top.node and p.y == top.y) top.x else 0;
+        const last = if (p.node == bot.node and p.y == bot.y) bot.x else cells.len - 1;
+        if (first > last or first >= cells.len) continue;
+        for (cells[first .. @min(last, cells.len - 1) + 1]) |*cell| {
             if (!cell.hyperlink) continue;
             const id = page.lookupHyperlink(cell) orelse continue;
             const uri = page.hyperlink_set.get(page.memory, id).uri.slice(page.memory);
@@ -580,6 +587,9 @@ test "copy_nav: copy chips in a selection are detected" {
     const r1 = screen.pages.pin(.{ .screen = .{ .x = 3, .y = 1 } }).?;
     try testing.expect(!selectionHasCopyLinks(screen, .init(r0, r0e, false)));
     try testing.expect(selectionHasCopyLinks(screen, .init(r0, r1, false)));
+    // The chip sits at cols 2-7 of row 1; selecting only col 0 misses it.
+    const r1a = screen.pages.pin(.{ .screen = .{ .x = 0, .y = 1 } }).?;
+    try testing.expect(!selectionHasCopyLinks(screen, .init(r0, r1a, false)));
 }
 
 test "copy_nav: the snapshot MIME is reserved" {

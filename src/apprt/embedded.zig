@@ -2337,6 +2337,13 @@ pub const CAPI = struct {
         return true;
     }
 
+    /// Whether the key event triggers copy_to_clipboard (see
+    /// Surface.keyEventIsCopyBinding).
+    export fn ghostty_surface_key_is_copy_binding(surface: *Surface, event: KeyEvent) bool {
+        const core_event = event.keyEvent().core() orelse return false;
+        return surface.core_surface.keyEventIsCopyBinding(core_event);
+    }
+
     /// Send raw text to the terminal. This is treated like a paste
     /// so this isn't useful for sending escape sequences. For that,
     /// individual key input should be used.
