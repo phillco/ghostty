@@ -366,8 +366,13 @@ struct VerticalTabsAgentClientTests {
             try #require(listen(listener, 4) == 0)
         }
 
+        /// Gives up after a few seconds, so a regression fails instead of hanging.
         func accept() {
+            var fds = pollfd(fd: listener, events: Int16(POLLIN), revents: 0)
+            guard poll(&fds, 1, 5000) == 1 else { return }
             client = Darwin.accept(listener, nil, nil)
+            var timeout = timeval(tv_sec: 5, tv_usec: 0)
+            setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         }
 
         func send(_ text: String) {

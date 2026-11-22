@@ -400,10 +400,20 @@ final class VerticalTabsGroupHost {
         guard let controller = windowsByID[id]?.terminalController else { return }
         let surfaces = Self.orderedSurfaces(controller)
         let agents = manager.agentSnapshot
-        if let session = surfaces.lazy.compactMap({ agents.session(for: Self.agentTerminal($0)) }).first,
-           !session.nativeId.isEmpty, !session.peerName.isEmpty {
-            copyToPasteboard("\(session.nativeId) (\(session.peerName))")
-            return
+        // Split by split, so the focused split's own session (from either
+        // source) beats a sibling's.
+        if !agents.isEmpty {
+            for surface in surfaces {
+                if let session = agents.session(for: Self.agentTerminal(surface)),
+                   !session.nativeId.isEmpty, !session.peerName.isEmpty {
+                    return copyToPasteboard("\(session.nativeId) (\(session.peerName))")
+                }
+                let terminal = VerticalTabsAgentLookup.Terminal(
+                    ttyName: surface.surfaceModel?.ttyName, foregroundPID: surface.surfaceModel?.foregroundPID)
+                if let session = VerticalTabsAgentLookup.session(for: [terminal]) {
+                    return copyToPasteboard(session.copyText)
+                }
+            }
         }
         let terminals = surfaces.map {
             VerticalTabsAgentLookup.Terminal(

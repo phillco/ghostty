@@ -435,7 +435,11 @@ private struct VerticalTabRowView: View {
                     HStack(spacing: style.metrics.itemSpacing) {
                         if let folder { FolderPill(folder: folder, style: style) }
                         if hasBadge {
-                            VerticalTabsAgentBadges.BadgeView(badge: row.badge, detail: .full, metrics: style.metrics)
+                            // Glyph only when a narrow row can't fit the rest.
+                            ViewThatFits(in: .horizontal) {
+                                VerticalTabsAgentBadges.BadgeView(badge: row.badge, detail: .full, metrics: style.metrics)
+                                VerticalTabsAgentBadges.BadgeView(badge: row.badge, detail: .glyph, metrics: style.metrics)
+                            }
                         }
                         if row.bell { bell }
                         if let age { ageText(age) }

@@ -65,12 +65,14 @@ final class VerticalTabsAgentClient {
         }
     }
 
-    /// Best effort: dropped when disconnected or the socket buffer is full.
+    /// Best effort: dropped when disconnected. A short write would leave half
+    /// a line for the next one to corrupt, so it drops the connection instead.
     func ackReply(key: String, replyId: String) {
         queue.async { [self] in
             guard fd >= 0 else { return }
             let line = VerticalTabs.Agent.ackReplyLine(id: UUID().uuidString, key: key, replyId: replyId)
-            _ = line.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            let written = line.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            if written != line.count { lost() }
         }
     }
 
@@ -103,6 +105,8 @@ final class VerticalTabsAgentClient {
         addr.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
         let sock = socket(AF_UNIX, SOCK_STREAM, 0)
         guard sock >= 0 else { return -1 }
+        // Shells and agents Ghostty spawns must not inherit the connection.
+        _ = fcntl(sock, F_SETFD, FD_CLOEXEC)
         var on: Int32 = 1
         setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         let result = withUnsafePointer(to: &addr) {
