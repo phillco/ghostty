@@ -10,8 +10,10 @@ struct StagedUpdateLocation: Equatable {
     /// The LaunchAgent that installs the staged build, if this flavor has one.
     let launchAgentLabel: String?
 
-    static let mainBundleID = "io.phillip.ghostty-phil"
-    static let testBundleID = "io.phillip.ghostty-phil.link-test.debug"
+    // Split so `ghostty-rebuild -t`, which rewrites the main ID throughout the Swift
+    // sources for the test app, leaves these intact.
+    static let mainBundleID = "io.phillip." + "ghostty-phil"
+    static let testBundleID = mainBundleID + ".link-test.debug"
     /// Points the watcher at another `staged/` directory, for GUI testing without real builds.
     static let overrideEnvironmentKey = "GHOSTTY_PHIL_STAGED_DIR"
 

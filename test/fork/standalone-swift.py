@@ -115,6 +115,12 @@ def prepare_package(repo: Path, package: Path) -> None:
         if not (repo / relative).is_file():
             raise ValueError(f"missing required source: {repo / relative}")
 
+    # ghostty-rebuild -t rewrites the main bundle ID throughout the Swift sources;
+    # the staged-update flavor IDs must survive that unchanged.
+    staged = (repo / "macos/Sources/Features/Update/StagedUpdate.swift").read_text()
+    if "io.phillip.ghostty-phil" in staged:
+        raise ValueError("StagedUpdate.swift spells out a bundle ID that ghostty-rebuild -t rewrites")
+
     core = package / "Sources/ForkCore"
     test_target = package / "Tests/ForkTests"
     c_module = package / "Sources/GhosttyKit"
