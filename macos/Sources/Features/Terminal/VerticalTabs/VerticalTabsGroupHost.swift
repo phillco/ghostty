@@ -12,6 +12,12 @@ struct VerticalTabRow: Identifiable, Equatable {
     let shortcut: Int?
     var isSelected: Bool
     let isPinned: Bool
+    /// `agentd` status; nil for plain shells or without the daemon.
+    var status: VerticalTabs.Agent.Display?
+    var awaitingKind: String = ""
+    var badge = VerticalTabs.Agent.Badge()
+    /// Note and child job lines for the tooltip.
+    var details: [String] = []
 }
 
 /// What the sidebar view renders and the actions it can take.
@@ -95,6 +101,8 @@ final class VerticalTabsGroupHost {
     /// A tab clicked in the sidebar that AppKit hasn't selected yet. Refreshes
     /// in between keep showing it selected, so the highlight never bounces back.
     private var pendingSelection: ObjectIdentifier?
+    /// Seconds until a visible active turn's elapsed age changes; nil for none.
+    private(set) var nextAgentTick: TimeInterval?
 
     init(tabGroup: NSWindowTabGroup, manager: VerticalTabsManager) {
         self.tabGroup = tabGroup
@@ -180,6 +188,7 @@ final class VerticalTabsGroupHost {
 
         windowsByID = Dictionary(uniqueKeysWithValues: windows.map { (ObjectIdentifier($0), $0) })
         let width = manager.settings.width
+        let agents = manager.agentSnapshot
         tabs = windows.map { window in
             let tracker = manager.tracker(for: window)
             tracker.syncBackdrop(in: window, width: width, color: window.preferredBackgroundColor)
@@ -189,6 +198,13 @@ final class VerticalTabsGroupHost {
             tracker.lastPlatform = platform.last
             let surfaces = controller.map { Array($0.surfaceTree) } ?? []
             let pwd = controller?.focusedSurface?.pwd ?? surfaces.first?.pwd
+            var agent: VerticalTabs.Agent.Summary?
+            if !agents.isEmpty, let controller {
+                let sessions = Self.orderedSurfaces(controller).compactMap {
+                    agents.session(for: Self.agentTerminal($0))
+                }
+                agent = VerticalTabs.Agent.summary(of: sessions)
+            }
             return VerticalTabs.Tab(
                 id: ObjectIdentifier(window),
                 surfaceIDs: surfaces.map(\.id.uuidString),
@@ -199,7 +215,8 @@ final class VerticalTabsGroupHost {
                 isSelected: ObjectIdentifier(window) == selectedID,
                 lastLeft: tracker.lastLeft,
                 lastActive: tracker.shownActive,
-                claimedPinKey: tracker.claimedPinKey
+                claimedPinKey: tracker.claimedPinKey,
+                agent: agent
             )
         }
 
@@ -222,18 +239,28 @@ final class VerticalTabsGroupHost {
             && VerticalTabs.hasRecentCandidates(tabs: tabs, pins: pins)
         if store.hasRecents != hasRecents { store.hasRecents = hasRecents }
         let now = Date()
+        var nextTick: TimeInterval?
         func rows(_ list: [VerticalTabs.Tab], pinned: Bool) -> [VerticalTabRow] {
             list.map { tab in
-                VerticalTabRow(
+                if let since = tab.agent?.turnSince {
+                    let tick = VerticalTabs.Agent.nextElapsedTick(since: since, now: now)
+                    nextTick = min(nextTick ?? tick, tick)
+                }
+                return VerticalTabRow(
                     id: tab.id,
                     title: tab.title,
                     platform: tab.platform,
                     folder: tab.folder,
                     bell: tab.bell,
-                    age: tab.isSelected ? nil : VerticalTabs.ageText(since: tab.lastActive, now: now),
+                    age: VerticalTabs.Agent.ageText(
+                        summary: tab.agent, fallback: tab.lastActive, isSelected: tab.isSelected, now: now),
                     shortcut: sections.shortcutNumber(for: tab.id),
                     isSelected: tab.isSelected,
-                    isPinned: pinned
+                    isPinned: pinned,
+                    status: tab.agent?.display,
+                    awaitingKind: tab.agent?.awaitingKind ?? "",
+                    badge: tab.agent?.badge ?? .init(),
+                    details: tab.agent?.details ?? []
                 )
             }
         }
@@ -243,6 +270,8 @@ final class VerticalTabsGroupHost {
         if store.pinned != pinnedRows { store.pinned = pinnedRows }
         if store.recents != recentRows { store.recents = recentRows }
         if store.open != openRows { store.open = openRows }
+        nextAgentTick = nextTick
+        if let nextTick { manager.scheduleAgentTick(after: nextTick) }
 
         // Rows first: the sidebar's first frame in a newly selected tab is current.
         if pendingSelection == nil, let selected = selectedWindow as? TerminalWindow,
@@ -346,13 +375,36 @@ final class VerticalTabsGroupHost {
         copyToPasteboard(title)
     }
 
-    /// `<sessionId> (<peerId>)` for the agent session in this tab, else the
-    /// focused surface's UUID.
+    /// A tab's splits, focused first, then the rest of the tree in order.
+    static func orderedSurfaces(_ controller: BaseTerminalController) -> [Ghostty.SurfaceView] {
+        let focused = controller.focusedSurface
+        return [focused].compactMap { $0 } + controller.surfaceTree.filter { $0 !== focused }
+    }
+
+    /// What `agentd` matching needs from a split. Main thread only, like
+    /// every sidebar refresh.
+    static func agentTerminal(_ surface: Ghostty.SurfaceView) -> VerticalTabs.Agent.Snapshot.Terminal {
+        MainActor.assumeIsolated {
+            let pid = surface.surfaceModel?.foregroundPID.flatMap { Int32(exactly: $0) }
+            return .init(
+                surfaceID: surface.id.uuidString,
+                pids: pid.map { [$0] } ?? [],
+                tty: surface.surfaceModel?.ttyName)
+        }
+    }
+
+    /// `<sessionId> (<peerId>)` for the agent session in this tab (from
+    /// `agentd` when it knows one), else the focused surface's UUID.
     @MainActor
     func copyID(_ id: ObjectIdentifier) {
         guard let controller = windowsByID[id]?.terminalController else { return }
-        let focused = controller.focusedSurface
-        let surfaces = [focused].compactMap { $0 } + controller.surfaceTree.filter { $0 !== focused }
+        let surfaces = Self.orderedSurfaces(controller)
+        let agents = manager.agentSnapshot
+        if let session = surfaces.lazy.compactMap({ agents.session(for: Self.agentTerminal($0)) }).first,
+           !session.nativeId.isEmpty, !session.peerName.isEmpty {
+            copyToPasteboard("\(session.nativeId) (\(session.peerName))")
+            return
+        }
         let terminals = surfaces.map {
             VerticalTabsAgentLookup.Terminal(
                 ttyName: $0.surfaceModel?.ttyName, foregroundPID: $0.surfaceModel?.foregroundPID)

@@ -22,6 +22,19 @@ final class VerticalTabsManager: NSObject {
     private var recentsCancellable: AnyCancellable?
     private var started = false
 
+    // MARK: agentd state
+
+    /// What `agentd` last reported; empty while it isn't running.
+    private(set) var agentSnapshot = VerticalTabs.Agent.Snapshot()
+    private var agentClient: VerticalTabsAgentClient?
+    /// A one-shot refresh for when an active turn's elapsed age next changes.
+    private var agentTickTimer: Timer?
+    /// The visibly focused split, and since when; see `evaluateAck`.
+    private var ackFocus: VerticalTabs.Agent.Focus?
+    /// Replies already acknowledged (`ackToken`), so refreshes never resend.
+    private var ackSent: Set<String> = []
+    private var ackTimer: Timer?
+
     var isEnabled: Bool { settings.enabled }
 
     /// How long a tab must stay selected before leaving it puts it in Recents.
@@ -85,6 +98,14 @@ final class VerticalTabsManager: NSObject {
         })
         if let config = (NSApp.delegate as? AppDelegate)?.ghostty.config { applyConfig(config) }
 
+        // Acknowledging a reply needs to know which split is visibly focused.
+        for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
+                     NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.evaluateAck()
+            })
+        }
+
         // `ghostty-test-mirror` rewrites our prefs while we run, then posts this.
         distributedObservers.append(DistributedNotificationCenter.default().addObserver(
             forName: Self.reloadPrefsNotification, object: nil, queue: .main
@@ -144,10 +165,12 @@ final class VerticalTabsManager: NSObject {
             timer.tolerance = 10
             RunLoop.main.add(timer, forMode: .common)
             ageTimer = timer
+            startAgentClient()
             refreshAll()
         } else {
             ageTimer?.invalidate()
             ageTimer = nil
+            stopAgentClient()
             // The filter or rename field may have focus; the terminal gets it back.
             // Other controls (a Find field) keep theirs.
             let sidebarFocused = terminalWindows.filter { window in
@@ -335,8 +358,94 @@ final class VerticalTabsManager: NSObject {
             guard let self, let group = window?.tabGroup else { return }
             self.hosts[ObjectIdentifier(group)]?.scheduleRefresh()
         }
+        // Moving focus between splits changes which reply is being read.
+        tracker.focusObservation = window.observe(\.firstResponder, options: []) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.evaluateAck() }
+        }
         trackers[key] = tracker
         return tracker
+    }
+
+    // MARK: agentd
+
+    private func startAgentClient() {
+        guard agentClient == nil else { return }
+        let client = VerticalTabsAgentClient { [weak self] snapshot in
+            self?.agentDidUpdate(snapshot)
+        }
+        agentClient = client
+        client.start()
+    }
+
+    private func stopAgentClient() {
+        agentClient?.stop()
+        agentClient = nil
+        agentTickTimer?.invalidate()
+        agentTickTimer = nil
+        ackTimer?.invalidate()
+        ackTimer = nil
+        agentDidUpdate(.init())
+    }
+
+    private func agentDidUpdate(_ snapshot: VerticalTabs.Agent.Snapshot) {
+        guard snapshot != agentSnapshot else { return }
+        agentSnapshot = snapshot
+        // A new connection may need a reply acknowledged again.
+        if snapshot.isEmpty { ackSent = [] }
+        refreshAll()
+        evaluateAck()
+    }
+
+    /// Refreshes once `delay` passes, unless an earlier refresh is already due.
+    /// Each refresh asks again, so ticks run only while a turn is visible.
+    func scheduleAgentTick(after delay: TimeInterval) {
+        let due = Date().addingTimeInterval(delay)
+        if let timer = agentTickTimer, timer.isValid, timer.fireDate <= due { return }
+        agentTickTimer?.invalidate()
+        let timer = Timer(fire: due, interval: 0, repeats: false) { [weak self] _ in
+            self?.agentTickTimer = nil
+            self?.refreshAll()
+        }
+        timer.tolerance = 0.1
+        RunLoop.main.add(timer, forMode: .common)
+        agentTickTimer = timer
+    }
+
+    /// The focused split of the key window's selected tab, while the app is
+    /// active and the split is on screen (not hidden by a zoom).
+    private var visiblyFocusedSurface: Ghostty.SurfaceView? {
+        guard NSApp.isActive, let window = NSApp.keyWindow as? TerminalWindow,
+              window.isVisible, window.tabGroup.map({ $0.selectedWindow === window }) ?? true,
+              let surface = window.terminalController?.focusedSurface,
+              surface.window === window else { return nil }
+        return surface
+    }
+
+    /// Acknowledges the unread reply in the visibly focused split once it has
+    /// been focused for the Recents dwell: a step past a tab keeps its dot.
+    /// Unfocused splits, background tabs and an inactive app never ack.
+    func evaluateAck() {
+        ackTimer?.invalidate()
+        ackTimer = nil
+        guard let client = agentClient else { return }
+        let now = Date()
+        let surface = visiblyFocusedSurface
+        let id = surface?.id.uuidString
+        if id != ackFocus?.surfaceID { ackFocus = id.map { .init(surfaceID: $0, since: now) } }
+        guard let surface, !agentSnapshot.isEmpty else { return }
+        let session = agentSnapshot.session(for: VerticalTabsGroupHost.agentTerminal(surface))
+        switch VerticalTabs.Agent.ackDecision(
+            focus: ackFocus, session: session, now: now, dwell: recentsDwell, sent: ackSent) {
+        case .none:
+            break
+        case .wait(let until):
+            let timer = Timer(fire: until, interval: 0, repeats: false) { [weak self] _ in self?.evaluateAck() }
+            RunLoop.main.add(timer, forMode: .common)
+            ackTimer = timer
+        case .send(let key, let replyId):
+            ackSent.insert(VerticalTabs.Agent.ackToken(key: key, replyId: replyId))
+            client.ackReply(key: key, replyId: replyId)
+        }
     }
 
     // MARK: Width
@@ -460,6 +569,8 @@ final class WindowTracker {
     var claimedPinKey: String?
     /// The agent platform seen last, kept across ambiguous spinner frames.
     var lastPlatform: VerticalTabs.Platform?
+    /// Watches split focus for acknowledging agent replies.
+    var focusObservation: NSKeyValueObservation?
 
     private var titleObservation: NSKeyValueObservation?
     private var bellCancellable: AnyCancellable?

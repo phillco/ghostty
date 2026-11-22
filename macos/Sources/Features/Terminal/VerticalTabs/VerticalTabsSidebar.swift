@@ -346,8 +346,12 @@ private struct VerticalTabRowView: View {
     /// Everything a narrow row may hide.
     private var tooltip: String {
         let main = row.folder.map { "\(row.title) — \($0)" } ?? row.title
-        return age.map { "\(main) · \($0)" } ?? main
+        var lines = [age.map { "\(main) · \($0)" } ?? main]
+        if let status = VerticalTabsAgentBadges.statusText(row) { lines.append(status) }
+        return (lines + row.details).joined(separator: "\n")
     }
+
+    private var hasBadge: Bool { !row.badge.isEmpty }
 
     private var dropAfter: Bool { store.dropTarget?.after ?? false }
 
@@ -383,9 +387,15 @@ private struct VerticalTabRowView: View {
     private var fittingCompact: some View {
         // A readable start of the title (`titleMinWidth`) outranks every
         // accessory, the icon included; only the last fallback lets it shrink.
+        // The folder pill goes first, then the badge's text, the badge, the
+        // age. The status mark is tiny and stays.
         let keep = style.metrics.titleMinWidth
         return ViewThatFits(in: .horizontal) {
-            if folder != nil { compactRow(pill: true, age: true, titleMin: keep, measured: keep) }
+            if folder != nil { compactRow(pill: true, age: true, badge: .full, titleMin: keep, measured: keep) }
+            if hasBadge {
+                compactRow(pill: false, age: true, badge: .full, titleMin: keep, measured: keep)
+                compactRow(pill: false, age: true, badge: .glyph, titleMin: keep, measured: keep)
+            }
             compactRow(pill: false, age: true, titleMin: keep, measured: keep)
             compactRow(pill: false, age: false, titleMin: 0, measured: keep)
             if style.showIcons { compactRow(pill: false, age: false, titleMin: 0, measured: 0, icon: false) }
@@ -397,12 +407,17 @@ private struct VerticalTabRowView: View {
     ///   - measured: the title width `ViewThatFits` checks for, so a long
     ///     title doesn't rule out a fallback that fits it truncated.
     private func compactRow(
-        pill: Bool, age showAge: Bool, titleMin: CGFloat, measured: CGFloat, icon: Bool = true
+        pill: Bool, age showAge: Bool, badge: VerticalTabsAgentBadges.Detail = .none,
+        titleMin: CGFloat, measured: CGFloat, icon: Bool = true
     ) -> some View {
         HStack(spacing: style.metrics.itemSpacing) {
             if icon, style.showIcons { glyph }
+            statusMark
             title(minWidth: titleMin, measuredWidth: measured)
             Spacer(minLength: style.metrics.spacerMin)
+            if hasBadge, badge != .none {
+                VerticalTabsAgentBadges.BadgeView(badge: row.badge, detail: badge, metrics: style.metrics)
+            }
             if row.bell { bell }
             if pill, let folder { FolderPill(folder: folder, style: style) }
             trailing(age: showAge)
@@ -412,11 +427,15 @@ private struct VerticalTabRowView: View {
     private var tall: some View {
         HStack(alignment: .center, spacing: style.metrics.itemSpacing) {
             if style.showIcons { glyph }
+            statusMark
             VStack(alignment: .leading, spacing: 2) {
                 title(minWidth: 0)
-                if folder != nil || row.bell || age != nil {
+                if folder != nil || row.bell || age != nil || hasBadge {
                     HStack(spacing: style.metrics.itemSpacing) {
                         if let folder { FolderPill(folder: folder, style: style) }
+                        if hasBadge {
+                            VerticalTabsAgentBadges.BadgeView(badge: row.badge, detail: .full, metrics: style.metrics)
+                        }
                         if row.bell { bell }
                         if let age { ageText(age) }
                     }
@@ -470,6 +489,14 @@ private struct VerticalTabRowView: View {
         }
         .font(.system(size: style.secondarySize))
         .frame(width: style.fontSize + 1)
+    }
+
+    @ViewBuilder
+    private var statusMark: some View {
+        if let status = row.status, status != .idle {
+            VerticalTabsAgentBadges.StatusMark(
+                status: status, awaitingKind: row.awaitingKind, metrics: style.metrics)
+        }
     }
 
     private var bell: some View {

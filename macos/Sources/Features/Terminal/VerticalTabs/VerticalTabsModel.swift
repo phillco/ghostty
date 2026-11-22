@@ -165,6 +165,8 @@ enum VerticalTabs {
         /// matching this tab even after its surface moves to another tab (split
         /// promoted to a new tab); the manager then re-keys the pin.
         var claimedPinKey: String?
+        /// Live agent state from `agentd` across this tab's splits; nil without one.
+        var agent: Agent.Summary?
 
         /// The key a new pin for this tab is stored under.
         var pinKey: String? { surfaceIDs.first }
