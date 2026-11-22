@@ -326,6 +326,17 @@ struct VerticalTabsAgentTests {
     // MARK: Narrow rows
 
     @MainActor
+    @Test(arguments: [(CGFloat(12), CGFloat(24)), (14, 12), (24, 10), (9, 9)])
+    func statusDotsFitTheGutterAtAnyFontSizes(title: CGFloat, secondary: CGFloat) {
+        let metrics = VerticalTabsMetrics(fontSize: title, secondarySize: secondary)
+        for status in [Agent.Display.awaiting, .working, .unread] {
+            let width = NSHostingView(rootView: VerticalTabsAgentBadges.StatusDot(
+                status: status, metrics: metrics)).fittingSize.width
+            #expect(width < metrics.rowPadding)
+        }
+    }
+
+    @MainActor
     @Test(arguments: [CGFloat(14), 16])
     func badgeFallbacksShrinkAndStayCompact(fontSize: CGFloat) {
         let metrics = VerticalTabsMetrics(fontSize: fontSize, secondarySize: fontSize - 2)

@@ -199,8 +199,11 @@ enum VerticalTabsAgentLookup {
         let foregroundPID: Int?
     }
 
-    /// Terminals in priority order (focused split first).
-    static func session(for terminals: [Terminal]) -> VerticalTabs.AgentSession? {
+    /// Terminals in priority order (focused split first). `candidates`
+    /// defaults to a fresh read of the session files.
+    static func session(
+        for terminals: [Terminal], candidates: [VerticalTabs.AgentSession]? = nil
+    ) -> VerticalTabs.AgentSession? {
         let keys = terminals.map {
             VerticalTabs.TerminalKey(
                 device: $0.ttyName.flatMap(device),
@@ -208,12 +211,12 @@ enum VerticalTabsAgentLookup {
         }
         guard keys.contains(where: { $0.device != nil || $0.foregroundPID != nil }) else { return nil }
         return VerticalTabs.matchSession(
-            terminals: keys, candidates: candidates(), process: process,
+            terminals: keys, candidates: candidates ?? self.candidates(), process: process,
             fileExists: FileManager.default.fileExists(atPath:))
     }
 
     /// Claude's own session files first, so Claude tabs get their registered name.
-    private static func candidates() -> [VerticalTabs.AgentSession] {
+    static func candidates() -> [VerticalTabs.AgentSession] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return sessions(in: home + "/.claude/sessions", prefix: "", suffix: ".json") { VerticalTabs.claudeSession(json: $0) }
             + sessions(in: "/tmp", prefix: "claude-clarc-", suffix: ".ready") { VerticalTabs.clarcSession(json: $0) }

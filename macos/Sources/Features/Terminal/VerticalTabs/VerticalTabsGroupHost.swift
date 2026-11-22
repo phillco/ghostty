@@ -403,6 +403,8 @@ final class VerticalTabsGroupHost {
         // Split by split, so the focused split's own session (from either
         // source) beats a sibling's.
         if !agents.isEmpty {
+            // One read of the session files for every split.
+            let candidates = VerticalTabsAgentLookup.candidates()
             for surface in surfaces {
                 if let session = agents.session(for: Self.agentTerminal(surface)),
                    !session.nativeId.isEmpty, !session.peerName.isEmpty {
@@ -410,10 +412,12 @@ final class VerticalTabsGroupHost {
                 }
                 let terminal = VerticalTabsAgentLookup.Terminal(
                     ttyName: surface.surfaceModel?.ttyName, foregroundPID: surface.surfaceModel?.foregroundPID)
-                if let session = VerticalTabsAgentLookup.session(for: [terminal]) {
+                if let session = VerticalTabsAgentLookup.session(for: [terminal], candidates: candidates) {
                     return copyToPasteboard(session.copyText)
                 }
             }
+            if let surface = surfaces.first { copyToPasteboard(surface.id.uuidString) }
+            return
         }
         let terminals = surfaces.map {
             VerticalTabsAgentLookup.Terminal(

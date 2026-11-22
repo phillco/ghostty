@@ -411,14 +411,17 @@ final class VerticalTabsManager: NSObject {
         agentTickTimer = timer
     }
 
-    /// The focused split of the key window's selected tab, while the app is
-    /// active, the split is on screen (not hidden by a zoom) and it has
-    /// keyboard focus (not the sidebar filter or a Find field).
+    /// The split with keyboard focus in the key window's selected tab, while
+    /// the app is active: the window's actual first responder (never the
+    /// sidebar filter or a Find field), not the controller's cached
+    /// `focusedSurface`, which can update after the KVO that calls us.
     private var visiblyFocusedSurface: Ghostty.SurfaceView? {
         guard NSApp.isActive, let window = NSApp.keyWindow as? TerminalWindow,
               window.isVisible, window.tabGroup.map({ $0.selectedWindow === window }) ?? true,
-              let surface = window.terminalController?.focusedSurface,
-              surface.window === window, window.firstResponder === surface else { return nil }
+              let surface = window.firstResponder as? Ghostty.SurfaceView,
+              surface.window === window,
+              window.terminalController?.surfaceTree.contains(where: { $0 === surface }) ?? false
+        else { return nil }
         return surface
     }
 

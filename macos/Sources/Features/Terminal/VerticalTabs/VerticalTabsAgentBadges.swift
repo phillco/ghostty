@@ -35,11 +35,18 @@ enum VerticalTabsAgentBadges {
         let metrics: VerticalTabsMetrics
 
         var body: some View {
-            let size = (metrics.secondarySize * (status == .working ? 0.42 : 0.52)).rounded()
+            let size = Self.diameter(status: status, metrics: metrics)
             Circle()
                 .fill(color)
                 .frame(width: size, height: size)
                 .accessibilityLabel(status == .awaiting ? "Awaiting" : status == .working ? "Working" : "Unread")
+        }
+
+        /// In proportion to the secondary text, but never wider than the
+        /// leading padding it sits in, whatever the two font sizes.
+        static func diameter(status: VerticalTabs.Agent.Display, metrics: VerticalTabsMetrics) -> CGFloat {
+            let wanted = (metrics.secondarySize * (status == .working ? 0.42 : 0.52)).rounded()
+            return max(2, min(wanted, metrics.rowPadding - 2))
         }
 
         private var color: Color {
