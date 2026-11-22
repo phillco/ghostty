@@ -34,6 +34,19 @@ final class VerticalTabsManager: NSObject {
     /// Acks sent per reply (`ackToken`), so refreshes never resend early.
     private var ackSent: [String: VerticalTabs.Agent.AckAttempt] = [:]
     private var ackTimer: Timer?
+    /// Replies acked but not yet confirmed read by agentd, and when; rows
+    /// show them read meanwhile. An ack agentd never confirms (failed saves,
+    /// retries exhausted) shows unread again after `optimisticReadTTL`.
+    private var optimisticReads: [String: Date] = [:]
+    private static let optimisticReadTTL: TimeInterval =
+        VerticalTabs.Agent.ackRetryAfter * Double(VerticalTabs.Agent.ackMaxAttempts) + 5
+
+    /// `agentSnapshot` as rows show it: with optimistic reads applied.
+    var displayedAgentSnapshot: VerticalTabs.Agent.Snapshot {
+        let now = Date()
+        let live = optimisticReads.filter { now.timeIntervalSince($0.value) < Self.optimisticReadTTL }
+        return agentSnapshot.markingRead(Set(live.keys))
+    }
 
     var isEnabled: Bool { settings.enabled }
 
@@ -209,14 +222,24 @@ final class VerticalTabsManager: NSObject {
         let id = ObjectIdentifier(target)
         // Marked before the switch: `windowDidBecomeMain` may run inside it.
         if directional { host.directionalTarget = id }
+        if !directional, let target = target as? TerminalWindow { markExplicitSelection(target) }
         target.makeKeyAndOrderFront(nil)
         // A refused switch (or one notifying later) must not mark a later one.
         if directional {
             DispatchQueue.main.async { [weak host] in
                 if host?.directionalTarget == id { host?.directionalTarget = nil }
             }
+        } else {
+            // Cmd+N to the tab already selected changes no focus to trigger it.
+            evaluateAck()
         }
         return true
+    }
+
+    /// The user picked this tab outright (sidebar click, Cmd+1…9): its
+    /// reply acks without the dwell, even if a walk landed on it before.
+    func markExplicitSelection(_ window: TerminalWindow) {
+        tracker(for: window).enteredDirectionally = false
     }
 
     // MARK: Windows
@@ -251,7 +274,10 @@ final class VerticalTabsManager: NSObject {
             let tracker = tracker(for: previous)
             if tracker.firstLeft == nil { tracker.firstLeft = now }
         }
-        if leaving != .same { tracker(for: window).lastEntered = now }
+        if leaving != .same {
+            tracker(for: window).lastEntered = now
+            tracker(for: window).enteredDirectionally = directional
+        }
         host.lastSelectedWindow = window
         host.keptRecents = update.kept
         // A walk's rows hold still: no earlier settle may reshuffle them mid-walk.
@@ -266,6 +292,8 @@ final class VerticalTabsManager: NSObject {
         // Rows first, then the move: the sidebar's first frame in this window
         // already shows this tab selected.
         host.refresh()
+        // The dwell (or none) for this arrival is known now.
+        evaluateAck()
     }
 
     /// Once a quick walk rests on `window` for the dwell time, only it stays
@@ -392,6 +420,8 @@ final class VerticalTabsManager: NSObject {
         agentSnapshot = snapshot
         // A new connection may need a reply acknowledged again.
         if snapshot.isEmpty { ackSent = [:] }
+        // Confirmed (or superseded) reads need no overlay.
+        optimisticReads = optimisticReads.filter { snapshot.isUnread(token: $0.key) }
         refreshAll()
         evaluateAck()
     }
@@ -431,8 +461,9 @@ final class VerticalTabsManager: NSObject {
         ackTimer = timer
     }
 
-    /// Acknowledges the unread reply in the visibly focused split once it has
-    /// been focused for the Recents dwell: a step past a tab keeps its dot.
+    /// Acknowledges the unread reply in the visibly focused split: at once,
+    /// or after the Recents dwell when previous/next stepping landed there,
+    /// so a step past a tab keeps its bar.
     /// Unfocused splits, background tabs and an inactive app never ack.
     func evaluateAck() {
         ackTimer?.invalidate()
@@ -444,8 +475,11 @@ final class VerticalTabsManager: NSObject {
         if id != ackFocus?.surfaceID { ackFocus = id.map { .init(surfaceID: $0, since: now) } }
         guard let surface, !agentSnapshot.isEmpty else { return }
         let session = agentSnapshot.session(for: VerticalTabsGroupHost.agentTerminal(surface))
+        let dwell = VerticalTabs.Agent.ackDwell(
+            enteredDirectionally: (surface.window as? TerminalWindow).map(enteredDirectionally) ?? false,
+            recentsDwell: recentsDwell)
         switch VerticalTabs.Agent.ackDecision(
-            focus: ackFocus, session: session, now: now, dwell: recentsDwell, sent: ackSent) {
+            focus: ackFocus, session: session, now: now, dwell: dwell, sent: ackSent) {
         case .none:
             break
         case .wait(let until):
@@ -454,9 +488,25 @@ final class VerticalTabsManager: NSObject {
             let token = VerticalTabs.Agent.ackToken(key: key, replyId: replyId)
             ackSent[token] = .init(count: (ackSent[token]?.count ?? 0) + 1, last: now)
             client.ackReply(key: key, replyId: replyId)
+            // The bar clears now, not when agentd's delta arrives.
+            if optimisticReads[token] == nil {
+                optimisticReads[token] = now
+                refreshAll()
+                // An unconfirmed read shows unread again once it expires.
+                scheduleAgentTick(after: Self.optimisticReadTTL)
+            }
             // Still unread later (a failed save)? Check again then.
             evaluateAckLater(at: now.addingTimeInterval(VerticalTabs.Agent.ackRetryAfter))
         }
+    }
+
+    /// Whether previous/next stepping landed on this tab (or is landing on it
+    /// now), so its reply waits out the dwell.
+    private func enteredDirectionally(_ window: TerminalWindow) -> Bool {
+        if let group = window.tabGroup, hosts[ObjectIdentifier(group)]?.directionalTarget == ObjectIdentifier(window) {
+            return true
+        }
+        return trackers[ObjectIdentifier(window)]?.enteredDirectionally ?? false
     }
 
     // MARK: Width
@@ -570,6 +620,8 @@ final class WindowTracker {
     var lastLeft: Date?
     /// When this tab was last selected; see `VerticalTabsManager.recentsDwell`.
     var lastEntered: Date?
+    /// Whether previous/next stepping made that selection; see `Agent.ackDwell`.
+    var enteredDirectionally = false
     /// Last real title change or bell. Focus deliberately doesn't count.
     var lastActive: Date?
     /// The first time any switch left this tab, even a walk past it.

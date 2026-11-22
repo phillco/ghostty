@@ -3487,6 +3487,12 @@ keybind: Keybinds = .{},
 /// truncates there. Changes apply on config reload.
 @"vertical-tabs-pill-max-chars": u16 = 12,
 
+/// macOS only. Whether a vertical tab whose agent session has new activity
+/// (but no unread reply) shows a dim blue bar down its leading edge. The
+/// bright bar for an unread reply always shows. Changes apply on config
+/// reload.
+@"vertical-tabs-activity-indicator": bool = true,
+
 /// The style of the macOS titlebar. Available values are: "native",
 /// "transparent", "tabs", and "hidden".
 ///

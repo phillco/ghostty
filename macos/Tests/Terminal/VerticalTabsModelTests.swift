@@ -341,7 +341,8 @@ struct VerticalTabsModelTests {
         #expect(Ghostty.Config.recentsDwell(2.5) == 2.5)
         #expect(Ghostty.Config.recentsDwell(100) == 30)
         #expect(VerticalTabsSettings.ConfigValues() == .init(
-            fontSize: nil, secondaryFontSize: nil, recentsLimit: 4, recentsDwell: 1, pillMaxChars: 12))
+            fontSize: nil, secondaryFontSize: nil, recentsLimit: 4, recentsDwell: 1, pillMaxChars: 12,
+            activityIndicator: true))
         #expect(VerticalTabsSettings.pointLabel(14) == "14pt")
         #expect(VerticalTabsSettings.pointLabel(14.5) == "14.5pt")
     }

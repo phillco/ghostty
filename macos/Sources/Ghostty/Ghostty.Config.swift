@@ -172,6 +172,14 @@ extension Ghostty {
             Int(uint("vertical-tabs-pill-max-chars") ?? 12)
         }
 
+        var verticalTabsActivityIndicator: Bool {
+            guard let config = self.config else { return true }
+            var v = true
+            let key = "vertical-tabs-activity-indicator"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return v
+        }
+
         /// A configured point size, or nil when unset (`<= 0`) or not finite.
         static func pointSize(_ value: Double?, in range: ClosedRange<CGFloat>) -> CGFloat? {
             guard let value, value.isFinite, value > 0 else { return nil }

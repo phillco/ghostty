@@ -54,6 +54,17 @@ struct VerticalTabsAgentTests {
             name: "agentd-stage2", agent: "claude", status: "running", startedAtMs: 7)])
     }
 
+    @Test func decodesHasNewActivityDefaultingToFalse() throws {
+        var state = Agent.Snapshot()
+        state.apply(try frame(#"""
+        {"type":"snapshot","sessions":[{"key":"a","status":"working","hasNewActivity":true},\#
+        {"key":"b","status":"idle"},{"key":"c","status":"idle","hasNewActivity":null}]}
+        """#))
+        #expect(state.sessions["a"]?.hasNewActivity == true)
+        #expect(state.sessions["b"]?.hasNewActivity == false)
+        #expect(state.sessions["c"]?.hasNewActivity == false)
+    }
+
     @Test func unknownStatusAndMissingFieldsDecodeLeniently() throws {
         var state = Agent.Snapshot()
         state.apply(try frame(#"{"type":"snapshot","sessions":[{"key":"k","status":"napping"}]}"#))
@@ -156,6 +167,39 @@ struct VerticalTabsAgentTests {
         let unread = session("u", .idle, unread: true)
         #expect(try #require(Agent.summary(of: [session("i", .idle), unread])).display == .unread)
         #expect(try #require(Agent.summary(of: [unread, session("w", .working)])).display == .working)
+    }
+
+    @Test func edgeBarIsIndependentOfWorkingAndAwaiting() throws {
+        // A split still working beside one with an unread reply: dot and bar both.
+        let both = try #require(Agent.summary(of: [session("w", .working), session("u", .idle, unread: true)]))
+        #expect(both.display == .working)
+        #expect(both.edge == .unread)
+        var awaiting = session("a", .awaiting)
+        awaiting.hasNewActivity = true
+        let asking = try #require(Agent.summary(of: [awaiting]))
+        #expect(asking.display == .awaiting)
+        #expect(asking.edge == .activity)
+        // Unread outranks activity; neither leaves no bar.
+        #expect(try #require(Agent.summary(of: [awaiting, session("u", .idle, unread: true)])).edge == .unread)
+        #expect(try #require(Agent.summary(of: [session("i", .idle)])).edge == nil)
+    }
+
+    @Test func activityIndicatorConfigHidesOnlyTheDimBar() {
+        #expect(Agent.EdgeMark.shown(.activity, activityIndicator: true) == .activity)
+        #expect(Agent.EdgeMark.shown(.activity, activityIndicator: false) == nil)
+        #expect(Agent.EdgeMark.shown(.unread, activityIndicator: false) == .unread)
+        #expect(Agent.EdgeMark.shown(nil, activityIndicator: true) == nil)
+        #expect(VerticalTabsAgentBadges.EdgeBar.opacity(.unread) == 1)
+        #expect(VerticalTabsAgentBadges.EdgeBar.opacity(.activity) == 0.4)
+    }
+
+    @Test func activityIndicatorConfigKeyDefaultsOnAndLiveReloads() throws {
+        let config = try TemporaryConfig("")
+        #expect(config.verticalTabsActivityIndicator)
+        #expect(VerticalTabsSettings.ConfigValues(config).activityIndicator)
+        try config.reload("vertical-tabs-activity-indicator = false")
+        #expect(!config.verticalTabsActivityIndicator)
+        #expect(!VerticalTabsSettings.ConfigValues(config).activityIndicator)
     }
 
     @Test func allUnknownDegradesToNoSummary() {
@@ -323,6 +367,37 @@ struct VerticalTabsAgentTests {
         #expect(Agent.ackDecision(focus: focus, session: noReply, now: now, dwell: dwell, sent: [:]) == .none)
     }
 
+    @Test func explicitSelectionAcksAtOnceButSteppingWaitsTheDwell() {
+        let unread = session("k", .idle, unread: true, reply: 1)
+        // Just focused: a click or Cmd+N sends now; previous/next waits.
+        let focus = Agent.Focus(surfaceID: "s", since: now)
+        let explicit = Agent.ackDwell(enteredDirectionally: false, recentsDwell: dwell)
+        let stepped = Agent.ackDwell(enteredDirectionally: true, recentsDwell: dwell)
+        #expect(explicit == 0)
+        #expect(stepped == dwell)
+        #expect(Agent.ackDecision(focus: focus, session: unread, now: now, dwell: explicit, sent: [:])
+            == .send(key: "k", replyId: "r1"))
+        #expect(Agent.ackDecision(focus: focus, session: unread, now: now, dwell: stepped, sent: [:])
+            == .wait(until: now.addingTimeInterval(dwell)))
+    }
+
+    @Test func optimisticReadsClearOnlyTheAckedReply() {
+        let state = Agent.Snapshot(sessions: [
+            session("a", .idle, unread: true, reply: 1),
+            session("b", .working, unread: true, reply: 2),
+        ])
+        let token = Agent.ackToken(key: "a", replyId: "r1")
+        let shown = state.markingRead([token])
+        #expect(shown.sessions["a"]?.unread == false)
+        #expect(shown.sessions["b"]?.unread == true)
+        #expect(state.isUnread(token: token))
+        #expect(!shown.isUnread(token: token))
+        // A newer reply isn't covered by the old ack.
+        let newer = Agent.Snapshot(sessions: [session("a", .idle, unread: true, reply: 3)])
+        #expect(newer.markingRead([token]).sessions["a"]?.unread == true)
+        #expect(!newer.isUnread(token: token))
+    }
+
     // MARK: Narrow rows
 
     @MainActor
@@ -334,6 +409,17 @@ struct VerticalTabsAgentTests {
                 status: status, metrics: metrics)).fittingSize.width
             #expect(width < metrics.rowPadding)
         }
+    }
+
+    @MainActor
+    @Test(arguments: [CGFloat(9), 14, 24])
+    func edgeBarSitsInTheSidebarGutter(fontSize: CGFloat) {
+        let metrics = VerticalTabsMetrics(fontSize: fontSize, secondarySize: fontSize - 2)
+        let bar = VerticalTabsAgentBadges.EdgeBar(edge: .unread, metrics: metrics)
+        #expect(NSHostingView(rootView: bar).fittingSize.width == VerticalTabsAgentBadges.EdgeBar.width)
+        // Left of the row, inside the sidebar's gutter.
+        #expect(VerticalTabsAgentBadges.EdgeBar.offset < 0)
+        #expect(-VerticalTabsAgentBadges.EdgeBar.offset <= VerticalTabsMetrics.sidebarGutter)
     }
 
     @MainActor

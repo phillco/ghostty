@@ -15,6 +15,8 @@ struct VerticalTabRow: Identifiable, Equatable {
     /// `agentd` status; nil for plain shells or without the daemon.
     var status: VerticalTabs.Agent.Display?
     var awaitingKind: String = ""
+    /// The unread/activity bar, independent of `status`.
+    var edge: VerticalTabs.Agent.EdgeMark?
     var badge = VerticalTabs.Agent.Badge()
     /// Note and child job lines for the tooltip.
     var details: [String] = []
@@ -188,7 +190,8 @@ final class VerticalTabsGroupHost {
 
         windowsByID = Dictionary(uniqueKeysWithValues: windows.map { (ObjectIdentifier($0), $0) })
         let width = manager.settings.width
-        let agents = manager.agentSnapshot
+        // Acked replies already show as read.
+        let agents = manager.displayedAgentSnapshot
         tabs = windows.map { window in
             let tracker = manager.tracker(for: window)
             tracker.syncBackdrop(in: window, width: width, color: window.preferredBackgroundColor)
@@ -259,6 +262,7 @@ final class VerticalTabsGroupHost {
                     isPinned: pinned,
                     status: tab.agent?.display,
                     awaitingKind: tab.agent?.awaitingKind ?? "",
+                    edge: tab.agent?.edge,
                     badge: tab.agent?.badge ?? .init(),
                     details: tab.agent?.details ?? []
                 )
@@ -322,6 +326,8 @@ final class VerticalTabsGroupHost {
         // isn't reparented mid-event, then hand keyboard focus to the terminal.
         store.markSelected(id)
         pendingSelection = id
+        // A click reads the tab: its reply acks at once, with no dwell.
+        if let terminal = window as? TerminalWindow { manager.markExplicitSelection(terminal) }
         DispatchQueue.main.async { [weak self] in
             self?.pendingSelection = nil
             window.makeKeyAndOrderFront(nil)
@@ -330,6 +336,8 @@ final class VerticalTabsGroupHost {
             }
             // Also covers a switch AppKit refused or that posted no notification.
             self?.refresh()
+            // Clicking the tab already selected changes no focus to trigger it.
+            self?.manager.evaluateAck()
         }
     }
 

@@ -126,7 +126,7 @@ struct VerticalTabsSidebar: View {
                     rows(store.open, section: \.open) { store.host?.moveOpen(fromOffsets: $0, toOffset: $1) }
                 }
             }
-            .padding(.horizontal, 6)
+            .padding(.horizontal, VerticalTabsMetrics.sidebarGutter)
             .padding(.bottom, 6)
         }
         // Row and section changes land in one frame, never animated.
@@ -169,7 +169,8 @@ struct VerticalTabsSidebar: View {
             showFolders: settings.showFolders,
             showIdleTime: settings.showIdleTime,
             showShortcuts: settings.showShortcuts,
-            showIcons: settings.showIcons)
+            showIcons: settings.showIcons,
+            activityIndicator: settings.config.activityIndicator)
     }
 
     /// - Parameters:
@@ -262,6 +263,9 @@ struct VerticalTabsMetrics: Equatable {
     let fontSize: CGFloat
     let secondarySize: CGFloat
 
+    /// Between the sidebar's edges and its rows; the unread bar lives here.
+    static let sidebarGutter: CGFloat = 6
+
     var minRowHeight: CGFloat { (fontSize * 1.9).rounded() }
     /// Space between rows. Each row pads half of it, so the gap (and the drop
     /// indicator drawn in it) stays inside a row's drop target.
@@ -293,7 +297,8 @@ private struct VerticalTabRowStyle: Equatable {
     let showIdleTime: Bool
     let showShortcuts: Bool
     let showIcons: Bool
-
+    /// `vertical-tabs-activity-indicator`: draw the dim activity bar.
+    let activityIndicator: Bool
 }
 
 private struct VerticalTabRowView: View {
@@ -321,6 +326,8 @@ private struct VerticalTabRowView: View {
         // Status lives in the leading padding, like Mail's unread dot, so
         // titles stay aligned and narrow rows lose nothing to it.
         .overlay(alignment: .leading) { statusDot }
+        // Unread/activity: a bar in the gutter left of the row, independent of the dot.
+        .overlay(alignment: .leading) { edgeBar }
         .background(
             RoundedRectangle(cornerRadius: style.metrics.cornerRadius, style: .continuous)
                 .fill(Color.primary.opacity(row.isSelected ? 0.11 : hovering ? 0.05 : 0))
@@ -351,6 +358,7 @@ private struct VerticalTabRowView: View {
         let main = row.folder.map { "\(row.title) — \($0)" } ?? row.title
         var lines = [age.map { "\(main) · \($0)" } ?? main]
         if let status = VerticalTabsAgentBadges.statusText(row) { lines.append(status) }
+        if let edge = VerticalTabsAgentBadges.edgeText(shownEdge) { lines.append(edge) }
         return (lines + row.details).joined(separator: "\n")
     }
 
@@ -506,9 +514,21 @@ private struct VerticalTabRowView: View {
             }
     }
 
+    private var shownEdge: VerticalTabs.Agent.EdgeMark? {
+        VerticalTabs.Agent.EdgeMark.shown(row.edge, activityIndicator: style.activityIndicator)
+    }
+
+    @ViewBuilder
+    private var edgeBar: some View {
+        if let edge = shownEdge {
+            VerticalTabsAgentBadges.EdgeBar(edge: edge, metrics: style.metrics)
+                .allowsHitTesting(false)
+        }
+    }
+
     @ViewBuilder
     private var statusDot: some View {
-        if let status = row.status, status != .idle {
+        if let status = row.status, status == .working || status == .awaiting {
             VerticalTabsAgentBadges.StatusDot(status: status, metrics: style.metrics)
                 .frame(width: style.metrics.rowPadding)
                 .allowsHitTesting(false)

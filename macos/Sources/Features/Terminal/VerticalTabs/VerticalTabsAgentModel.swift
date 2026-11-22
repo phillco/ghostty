@@ -94,13 +94,17 @@ extension VerticalTabs.Agent {
         var lastReplyMs: Int64?
         var lastReplyId: String = ""
         var unread: Bool = false
+        /// Output since you last looked, short of a finished reply (agentd's
+        /// upcoming activity field); false from daemons that don't send it.
+        var hasNewActivity: Bool = false
         var note: Note?
         var childJobs: [ChildJob] = []
 
         init(
             key: String, status: Status = .unknown, awaitingKind: String = "",
             turnSinceMs: Int64? = nil, lastPromptMs: Int64? = nil, lastReplyMs: Int64? = nil,
-            lastReplyId: String = "", unread: Bool = false, note: Note? = nil, childJobs: [ChildJob] = [],
+            lastReplyId: String = "", unread: Bool = false, hasNewActivity: Bool = false,
+            note: Note? = nil, childJobs: [ChildJob] = [],
             provider: String = "", peerName: String = "", title: String = ""
         ) {
             self.key = key
@@ -111,6 +115,7 @@ extension VerticalTabs.Agent {
             self.lastReplyMs = lastReplyMs
             self.lastReplyId = lastReplyId
             self.unread = unread
+            self.hasNewActivity = hasNewActivity
             self.note = note
             self.childJobs = childJobs
             self.provider = provider
@@ -132,13 +137,14 @@ extension VerticalTabs.Agent {
             lastReplyMs = try c.decodeIfPresent(Int64.self, forKey: .lastReplyMs)
             lastReplyId = try c.decodeIfPresent(String.self, forKey: .lastReplyId) ?? ""
             unread = try c.decodeIfPresent(Bool.self, forKey: .unread) ?? false
+            hasNewActivity = try c.decodeIfPresent(Bool.self, forKey: .hasNewActivity) ?? false
             note = try c.decodeIfPresent(Note.self, forKey: .note)
             childJobs = try c.decodeIfPresent([ChildJob].self, forKey: .childJobs) ?? []
         }
 
         private enum CodingKeys: String, CodingKey {
             case key, provider, nativeId, peerName, title, status, awaitingKind, turnSinceMs, lastPromptMs
-            case lastReplyMs, lastReplyId, unread, note, childJobs
+            case lastReplyMs, lastReplyId, unread, hasNewActivity, note, childJobs
         }
     }
 
@@ -241,6 +247,25 @@ extension VerticalTabs.Agent {
             return self != before
         }
 
+        /// This snapshot with the replies in `reads` (`ackToken`s) shown as read,
+        /// before agentd confirms an ack. Indexes are unchanged.
+        func markingRead(_ reads: Set<String>) -> Snapshot {
+            guard !reads.isEmpty else { return self }
+            var copy = self
+            for (key, session) in sessions where session.unread
+                && reads.contains(VerticalTabs.Agent.ackToken(key: key, replyId: session.lastReplyId)) {
+                copy.sessions[key]?.unread = false
+            }
+            return copy
+        }
+
+        /// Whether this reply is still unread here, i.e. an ack is unconfirmed.
+        func isUnread(token: String) -> Bool {
+            sessions.values.contains {
+                $0.unread && VerticalTabs.Agent.ackToken(key: $0.key, replyId: $0.lastReplyId) == token
+            }
+        }
+
         /// First attachment wins each index slot, like agentd's sorted order.
         private mutating func reindex() {
             bySurfaceID = [:]
@@ -300,6 +325,31 @@ extension VerticalTabs.Agent {
         }
     }
 
+    /// The bar down a row's leading edge, independent of `Display`: a tab
+    /// can be working and unread at once.
+    enum EdgeMark: Equatable {
+        /// A finished turn you haven't read: bright.
+        case unread
+        /// New output short of a reply: dim, and `vertical-tabs-activity-indicator` can hide it.
+        case activity
+
+        /// Any matched split unread, else any with new activity.
+        init?(_ sessions: [Session]) {
+            if sessions.contains(where: \.unread) {
+                self = .unread
+            } else if sessions.contains(where: \.hasNewActivity) {
+                self = .activity
+            } else {
+                return nil
+            }
+        }
+
+        /// What a row draws: the activity bar only while the config allows it.
+        static func shown(_ mark: EdgeMark?, activityIndicator: Bool) -> EdgeMark? {
+            mark == .activity && !activityIndicator ? nil : mark
+        }
+    }
+
     /// A compact badge after the title.
     enum BadgeKind: Equatable {
         case attention   // needs-you, blocked
@@ -339,6 +389,7 @@ extension VerticalTabs.Agent {
         var details: [String]
         /// The highest-priority split's session.
         var primaryKey: String
+        var edge: EdgeMark?
     }
 
     static func date(ms: Int64?) -> Date? {
@@ -418,7 +469,8 @@ extension VerticalTabs.Agent {
                 progress: note?.progress,
                 jobs: jobs.count),
             details: details,
-            primaryKey: primary.key)
+            primaryKey: primary.key,
+            edge: EdgeMark(unique))
     }
 
     /// Elapsed time for an active turn: `28s`, `2m`, `1h`, `3d`.
@@ -485,7 +537,7 @@ extension VerticalTabs.Agent {
 
     /// Whether to acknowledge the reply shown in the visibly focused split.
     /// Only an unread reply, only after the split has been focused for
-    /// `dwell` (stepping past a tab keeps its dot), and each reply once unless
+    /// `dwell` (see `ackDwell`: stepping past a tab keeps its bar), and each reply once unless
     /// it stays unread (bounded retries). A reply arriving after the dwell
     /// sends right away.
     static func ackDecision(
@@ -502,4 +554,12 @@ extension VerticalTabs.Agent {
     }
 
     static func ackToken(key: String, replyId: String) -> String { key + "\u{0}" + replyId }
+
+    /// How long a split must stay focused before its reply is acknowledged:
+    /// the Recents dwell only when previous/next stepping landed on its tab,
+    /// so a walk past tabs keeps their bars; any other arrival (a sidebar
+    /// click, Cmd+1…9) acks at once.
+    static func ackDwell(enteredDirectionally: Bool, recentsDwell: TimeInterval) -> TimeInterval {
+        enteredDirectionally ? recentsDwell : 0
+    }
 }

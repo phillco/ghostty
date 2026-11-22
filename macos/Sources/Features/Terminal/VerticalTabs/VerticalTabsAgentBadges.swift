@@ -6,7 +6,6 @@ import SwiftUI
 enum VerticalTabsAgentBadges {
     static let amber = Color(red: 1.0, green: 0.72, blue: 0.0)
     static let working = Color(red: 1.0, green: 0.55, blue: 0.2)
-    static let unread = Color(red: 0.2, green: 0.55, blue: 1.0)
     static let done = Color(red: 0.3, green: 0.78, blue: 0.4)
 
     /// How much of a badge a row has room for.
@@ -24,12 +23,47 @@ enum VerticalTabsAgentBadges {
         case .awaiting?:
             return row.awaitingKind.isEmpty ? "Awaiting you" : "Awaiting \(row.awaitingKind)"
         case .working?: return "Working"
-        case .unread?: return "Unread reply"
-        case .idle?, nil: return nil
+        case .unread?, .idle?, nil: return nil
         }
     }
 
-    /// The leading-gutter dot: amber awaiting, orange working, blue unread.
+    /// The tooltip's unread/activity line.
+    static func edgeText(_ edge: VerticalTabs.Agent.EdgeMark?) -> String? {
+        switch edge {
+        case .unread?: return "Unread reply"
+        case .activity?: return "New activity"
+        case nil: return nil
+        }
+    }
+
+    /// A Clarc-style capsule down the row's leading edge: bright blue for an
+    /// unread reply, dim for new activity. It sits in the sidebar's outer
+    /// gutter, left of the row, so it costs the row no width and never meets
+    /// the status dot or platform icon.
+    struct EdgeBar: View {
+        let edge: VerticalTabs.Agent.EdgeMark
+        let metrics: VerticalTabsMetrics
+
+        static let width: CGFloat = 3
+        /// Its leading offset from the row: into the gutter, 1.5pt clear of the row.
+        static let offset: CGFloat = -(width + 1.5)
+
+        static func opacity(_ edge: VerticalTabs.Agent.EdgeMark) -> Double {
+            edge == .unread ? 1 : 0.4
+        }
+
+        var body: some View {
+            Capsule()
+                .fill(Color(nsColor: .systemBlue).opacity(Self.opacity(edge)))
+                .frame(width: Self.width)
+                .padding(.vertical, (metrics.minRowHeight * 0.18).rounded())
+                .offset(x: Self.offset)
+                .accessibilityLabel(edge == .unread ? "Unread" : "New activity")
+        }
+    }
+
+    /// The leading-gutter dot: amber awaiting, orange working. Unread is the
+    /// `EdgeBar`, so a tab can show both.
     struct StatusDot: View {
         let status: VerticalTabs.Agent.Display
         let metrics: VerticalTabsMetrics
@@ -39,7 +73,7 @@ enum VerticalTabsAgentBadges {
             Circle()
                 .fill(color)
                 .frame(width: size, height: size)
-                .accessibilityLabel(status == .awaiting ? "Awaiting" : status == .working ? "Working" : "Unread")
+                .accessibilityLabel(status == .awaiting ? "Awaiting" : "Working")
         }
 
         /// In proportion to the secondary text, but never wider than the
@@ -53,8 +87,7 @@ enum VerticalTabsAgentBadges {
             switch status {
             case .awaiting: return amber
             case .working: return working
-            case .unread: return unread
-            case .idle: return .clear
+            case .unread, .idle: return .clear
             }
         }
     }

@@ -35,6 +35,8 @@ final class VerticalTabsSettings: ObservableObject {
         var recentsDwell: TimeInterval = 1
         /// 0: no character limit (pills still stop at 40% of the sidebar).
         var pillMaxChars = 12
+        /// Draw the dim new-activity edge bar (the unread bar always draws).
+        var activityIndicator = true
     }
 
     static let defaultWidth: CGFloat = 240
@@ -281,6 +283,7 @@ extension VerticalTabsSettings.ConfigValues {
             secondaryFontSize: config.verticalTabsSecondaryFontSize,
             recentsLimit: config.verticalTabsRecentsLimit,
             recentsDwell: config.verticalTabsRecentsDwell,
-            pillMaxChars: config.verticalTabsPillMaxChars)
+            pillMaxChars: config.verticalTabsPillMaxChars,
+            activityIndicator: config.verticalTabsActivityIndicator)
     }
 }
